@@ -26,16 +26,8 @@ public static class Strategies
         public IReadOnlyList<string> Squad => FullSquad;
         public void Decide(PlayerState pl, int t)
         {
-            var farm = Content.Buildings.Farm;
-            var barracks = Content.Buildings.Barracks;
-            if (pl.Farms.Count < farm.MaxCount && pl.Gold >= farm.Cost)
-            {
-                pl.Gold -= farm.Cost; pl.BuildBusy = "farm"; pl.BuildTimer = farm.BuildTime; return;
-            }
-            if (pl.Farms.Count >= farm.MaxCount && !pl.HasBarracks && pl.Gold >= barracks.Cost)
-            {
-                pl.Gold -= barracks.Cost; pl.BuildBusy = "barracks"; pl.BuildTimer = barracks.BuildTime;
-            }
+            if (MatchEngine.StartBuild(pl, "farm")) return;
+            if (pl.Farms.Count >= Content.Buildings.Farm.MaxCount) MatchEngine.StartBuild(pl, "barracks");
         }
     }
 
@@ -46,19 +38,11 @@ public static class Strategies
         public void Decide(PlayerState pl, int t)
         {
             var wall = Content.Buildings.Wall;
-            var barracks = Content.Buildings.Barracks;
             // repairs only compete for the idle build slot once the initial
             // wall -> barracks order is done, so they never preempt reaching barracks
             if (pl.HasBarracks && MatchEngine.StartRepair(pl, t)) return;
-            if (pl.WallMaxHp < wall.MaxSegments * wall.HpPerSegment && pl.Gold >= wall.Cost)
-            {
-                pl.WallMaxHp += wall.HpPerSegment;
-                pl.Gold -= wall.Cost; pl.BuildBusy = "wall"; pl.BuildTimer = wall.BuildTime; return;
-            }
-            if (pl.WallMaxHp >= wall.MaxSegments * wall.HpPerSegment && !pl.HasBarracks && pl.Gold >= barracks.Cost)
-            {
-                pl.Gold -= barracks.Cost; pl.BuildBusy = "barracks"; pl.BuildTimer = barracks.BuildTime;
-            }
+            if (MatchEngine.StartBuild(pl, "wall")) return;
+            if (pl.WallMaxHp >= wall.MaxSegments * wall.HpPerSegment) MatchEngine.StartBuild(pl, "barracks");
         }
     }
 
@@ -68,11 +52,7 @@ public static class Strategies
         public IReadOnlyList<string> Squad => FullSquad;
         public void Decide(PlayerState pl, int t)
         {
-            var barracks = Content.Buildings.Barracks;
-            if (!pl.HasBarracks && pl.Gold >= barracks.Cost)
-            {
-                pl.Gold -= barracks.Cost; pl.BuildBusy = "barracks"; pl.BuildTimer = barracks.BuildTime;
-            }
+            MatchEngine.StartBuild(pl, "barracks");
         }
     }
 

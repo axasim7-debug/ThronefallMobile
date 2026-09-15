@@ -22,7 +22,7 @@ public static class MatchEngine
     public static double CurrentHp(Structure s, int t) =>
         s.Destroyed ? 0 : Math.Max(0, Ceiling(s.MaxHp, t) - s.DamageTaken);
 
-    private static void DamageStructure(Structure s, double dmg, int t)
+    internal static void DamageStructure(Structure s, double dmg, int t)
     {
         s.DamageTaken += dmg;
         if (!s.Destroyed && CurrentHp(s, t) <= 0) s.Destroyed = true;
@@ -66,6 +66,11 @@ public static class MatchEngine
 
     public static bool StartRepair(PlayerState pl, int t)
     {
+        // Repair occupies the same single build slot as everything else.
+        // Bots only ever call this with an idle slot, so this guard changes
+        // no existing number — but without it a networked player could
+        // overwrite (and silently cancel) a build they had already paid for.
+        if (pl.BuildBusy is not null) return false;
         var need = DamagedStructureNeeding(pl, t);
         if (need is null) return false;
         var r = Content.Repair;
@@ -90,10 +95,57 @@ public static class MatchEngine
         return true;
     }
 
+    /// <summary>
+    /// Server-authoritative build order. Both the test bots (Strategies) and
+    /// real player commands (MatchSession) go through this exact path, so a
+    /// networked player can never obtain a build a bot couldn't — the
+    /// affordability/prerequisite rules live in one place only.
+    /// Returns false (rather than throwing) when the order is illegal.
+    /// </summary>
+    public static bool StartBuild(PlayerState pl, string building)
+    {
+        if (pl.BuildBusy is not null) return false;
+        switch (building)
+        {
+            case "farm":
+            {
+                var farm = Content.Buildings.Farm;
+                if (pl.Farms.Count >= farm.MaxCount || pl.Gold < farm.Cost) return false;
+                pl.Gold -= farm.Cost;
+                pl.BuildBusy = "farm";
+                pl.BuildTimer = farm.BuildTime;
+                return true;
+            }
+            case "wall":
+            {
+                var wall = Content.Buildings.Wall;
+                if (pl.WallMaxHp >= wall.MaxSegments * wall.HpPerSegment || pl.Gold < wall.Cost) return false;
+                // MaxHp rises at order time, the HP itself lands on completion
+                // (AdvanceBuild) — preserved from the original strategy code.
+                pl.WallMaxHp += wall.HpPerSegment;
+                pl.Gold -= wall.Cost;
+                pl.BuildBusy = "wall";
+                pl.BuildTimer = wall.BuildTime;
+                return true;
+            }
+            case "barracks":
+            {
+                var barracks = Content.Buildings.Barracks;
+                if (pl.HasBarracks || pl.Gold < barracks.Cost) return false;
+                pl.Gold -= barracks.Cost;
+                pl.BuildBusy = "barracks";
+                pl.BuildTimer = barracks.BuildTime;
+                return true;
+            }
+            default:
+                return false;
+        }
+    }
+
     public static bool StartTroop(PlayerState pl, string troopKey)
     {
         if (pl.TroopBusy || !pl.HasBarracks) return false;
-        var troop = Content.Troops[troopKey];
+        if (!Content.Troops.TryGetValue(troopKey, out var troop)) return false;
         if (pl.Gold < troop.Cost) return false;
         pl.Gold -= troop.Cost;
         pl.TroopBusy = true;
@@ -102,7 +154,7 @@ public static class MatchEngine
         return true;
     }
 
-    private static void AdvanceBuild(PlayerState pl, int t)
+    internal static void AdvanceBuild(PlayerState pl, int t)
     {
         if (pl.BuildBusy is null) return;
         pl.BuildTimer--;
@@ -134,7 +186,7 @@ public static class MatchEngine
         pl.BuildBusy = null;
     }
 
-    private static void AdvanceTroop(PlayerState pl, int t, Action<MarchingTroop> onSpawn)
+    internal static void AdvanceTroop(PlayerState pl, int t, Action<MarchingTroop> onSpawn)
     {
         if (!pl.TroopBusy) return;
         pl.TroopTimer--;
@@ -193,7 +245,7 @@ public static class MatchEngine
 
     private static FarmInstance? WeakestAliveFarm(PlayerState pl) => pl.Farms.FirstOrDefault(f => f.Hp > 0);
 
-    private static void ResolveAttack(PlayerState defender, MarchingTroop troop, int t)
+    internal static void ResolveAttack(PlayerState defender, MarchingTroop troop, int t)
     {
         if (defender.KeepDestroyedAtT is not null) return;
         double hp = troop.Hp;
@@ -260,32 +312,43 @@ public static class MatchEngine
 
     // ---- commanders / rage ----
 
-    private sealed record PendingCast(PlayerState Self, PlayerState Opponent, string Kind, string Target, double Amount);
+    internal sealed record PendingCast(PlayerState Self, PlayerState Opponent, string Kind, string Target, double Amount);
 
-    private static List<PendingCast> DecideCommanderCasts(PlayerState self, PlayerState opponent, int t)
+    /// <summary>
+    /// Rage accrues at one flat rate for everyone and nothing may alter it —
+    /// see docs/PROGRESS.md: letting anything speed this up would indirectly
+    /// sell "more ability casts", which the monetization rules forbid.
+    /// </summary>
+    internal static void FillRage(PlayerState pl)
     {
-        var pending = new List<PendingCast>();
-        foreach (var cmd in self.Commanders)
-        {
+        foreach (var cmd in pl.Commanders)
             cmd.Rage = Math.Min(Content.Rage.Max, cmd.Rage + Content.Rage.FillRatePerSec);
-            var def = Content.Commanders[cmd.Key];
-            if (cmd.Rage < def.RageCost) continue;
-            var targetsEnemy = def.RageEffect.Target is "enemyFarm" or "enemyTower";
-            if (targetsEnemy && opponent.KeepDestroyedAtT is not null) continue;
-            cmd.Rage -= def.RageCost;
-            cmd.Casts++;
-
-            var amount = AtLevel(def.RageEffect.AmountByLevel, cmd.Levels["rage"]);
-            if (def.Passives.RageEffectBonusByLevel is { } bonus)
-                amount *= AtLevel(bonus, cmd.Levels["rageEffectBonus"]);
-            if (cmd.IsMastered()) amount *= def.Mastery.RageEffectMultiplier;
-
-            pending.Add(new PendingCast(self, opponent, def.RageEffect.Kind, def.RageEffect.Target, amount));
-        }
-        return pending;
     }
 
-    private static void ApplyCommanderCast(PendingCast cast, int t)
+    /// <summary>
+    /// Spends rage and produces the cast, or returns null if it isn't
+    /// castable right now. Authoritative: a player command lands here with
+    /// exactly the same checks a bot gets, so the client can never fire an
+    /// ability it hasn't actually charged.
+    /// </summary>
+    internal static PendingCast? TryCast(PlayerState self, PlayerState opponent, CommanderInstance cmd, int t)
+    {
+        var def = Content.Commanders[cmd.Key];
+        if (cmd.Rage < def.RageCost) return null;
+        var targetsEnemy = def.RageEffect.Target is "enemyFarm" or "enemyTower";
+        if (targetsEnemy && opponent.KeepDestroyedAtT is not null) return null;
+        cmd.Rage -= def.RageCost;
+        cmd.Casts++;
+
+        var amount = AtLevel(def.RageEffect.AmountByLevel, cmd.Levels["rage"]);
+        if (def.Passives.RageEffectBonusByLevel is { } bonus)
+            amount *= AtLevel(bonus, cmd.Levels["rageEffectBonus"]);
+        if (cmd.IsMastered()) amount *= def.Mastery.RageEffectMultiplier;
+
+        return new PendingCast(self, opponent, def.RageEffect.Kind, def.RageEffect.Target, amount);
+    }
+
+    internal static void ApplyCommanderCast(PendingCast cast, int t)
     {
         if (cast.Kind == "damageStructure")
         {
@@ -358,57 +421,16 @@ public static class MatchEngine
 
     // ---- top-level simulation ----
 
+    /// <summary>
+    /// Runs a full bot-vs-bot match. This is now a thin driver over
+    /// MatchSession — the tick loop itself lives there and is shared with
+    /// live networked matches, so these validated numbers keep testing the
+    /// code real players actually run.
+    /// </summary>
     public static (PlayerState A, PlayerState B, MatchResult Result) Simulate(IStrategy stratA, IStrategy stratB)
     {
-        var a = InitPlayer(stratA.Name, stratA.Squad);
-        var b = InitPlayer(stratB.Name, stratB.Squad);
-        var arrivalsToA = new Dictionary<int, List<MarchingTroop>>();
-        var arrivalsToB = new Dictionary<int, List<MarchingTroop>>();
-        var duration = Content.Economy.DurationSeconds;
-
-        void Queue(Dictionary<int, List<MarchingTroop>> map, MarchingTroop arrival)
-        {
-            if (!map.TryGetValue(arrival.ArriveAt, out var list)) map[arrival.ArriveAt] = list = new List<MarchingTroop>();
-            list.Add(arrival);
-        }
-
-        for (var t = 0; t <= duration; t++)
-        {
-            if (arrivalsToA.TryGetValue(t, out var arrA)) foreach (var tr in arrA) ResolveAttack(a, tr, t);
-            if (arrivalsToB.TryGetValue(t, out var arrB)) foreach (var tr in arrB) ResolveAttack(b, tr, t);
-
-            if (t > 0)
-            {
-                foreach (var pl in new[] { a, b })
-                {
-                    if (pl.KeepDestroyedAtT is not null) continue;
-                    pl.Disruptions = pl.Disruptions.Where(d => d.Until > t).ToList();
-                    var penalty = pl.Disruptions.Sum(d => d.Amount);
-                    pl.Gold += Math.Max(1, pl.Income - penalty);
-                }
-
-                if (a.KeepDestroyedAtT is null) { AdvanceBuild(a, t); AdvanceTroop(a, t, arr => Queue(arrivalsToB, arr)); }
-                if (b.KeepDestroyedAtT is null) { AdvanceBuild(b, t); AdvanceTroop(b, t, arr => Queue(arrivalsToA, arr)); }
-
-                var pending = new List<PendingCast>();
-                if (a.KeepDestroyedAtT is null) pending.AddRange(DecideCommanderCasts(a, b, t));
-                if (b.KeepDestroyedAtT is null) pending.AddRange(DecideCommanderCasts(b, a, t));
-                foreach (var cast in pending.Where(c => c.Kind == "damageStructure")) ApplyCommanderCast(cast, t);
-                foreach (var cast in pending.Where(c => c.Kind != "damageStructure")) ApplyCommanderCast(cast, t);
-            }
-
-            if (a.KeepDestroyedAtT is null)
-            {
-                if (a.BuildBusy is null) stratA.Decide(a, t);
-                if (!a.TroopBusy) StartTroop(a, stratA.PickTroop(a));
-            }
-            if (b.KeepDestroyedAtT is null)
-            {
-                if (b.BuildBusy is null) stratB.Decide(b, t);
-                if (!b.TroopBusy) StartTroop(b, stratB.PickTroop(b));
-            }
-        }
-
-        return (a, b, DetermineWinner(a, b));
+        var session = new MatchSession(new BotController(stratA), new BotController(stratB));
+        session.RunToCompletion();
+        return (session.A, session.B, session.Result!);
     }
 }
