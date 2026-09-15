@@ -21,8 +21,9 @@ function fmt(pl, content) {
 
 console.log(`Round length: ${content.ECONOMY.duration}s | Tower HP: ${content.DEFENSE.tower.hp}x${content.DEFENSE.towerCount} | Keep HP: ${content.DEFENSE.keep.hp} | Reinforce: ${content.DEFENSE.reinforce.startFraction * 100}%->100% over ${content.DEFENSE.reinforce.rampSeconds}s\n`);
 for (const [a, b] of MATCHUPS) {
-  const { A, B } = simulate(ALL[a], ALL[b], content);
-  console.log(`${a} vs ${b}`);
+  const { A, B, result } = simulate(ALL[a], ALL[b], content);
+  const winnerLabel = result.winner === "draw" ? "DRAW" : `${result.winner === "A" ? a : b} wins`;
+  console.log(`${a} vs ${b}  ->  ${winnerLabel}  (${result.tiebreak})`);
   console.log("  A: " + fmt(A, content));
   console.log("  B: " + fmt(B, content));
 }

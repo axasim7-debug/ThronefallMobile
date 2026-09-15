@@ -385,7 +385,37 @@ function simulate(stratA, stratB, content) {
     }
   }
 
-  return { A, B };
+  return { A, B, result: determineWinner(A, B, content) };
 }
 
-module.exports = { simulate, initPlayer, startRepair, damagedStructure, currentHP, ceiling };
+// Time-up resolution — most matches WILL reach this, not just the test
+// archetypes here: real players make imperfect, mixed decisions, not the
+// single-minded pure strategies this tool stress-tests with. Mirrors
+// Clash Royale's own tiebreak order, which maps naturally onto our
+// tower/keep structure:
+//   1. an outright keep kill always wins (already resolved above)
+//   2. most enemy towers destroyed ("crowns")
+//   3. higher remaining % of your OWN keep HP (took less damage overall)
+//   4. true draw if both are exactly tied
+// Returns { winner: "A"|"B"|"draw", tiebreak: string } — tiebreak names
+// which rule decided it, for introspection/debugging, not used as logic.
+function determineWinner(A, B, content) {
+  if (A.keepDestroyedAtT !== null && B.keepDestroyedAtT === null) return { winner: "B", tiebreak: "keep-kill" };
+  if (B.keepDestroyedAtT !== null && A.keepDestroyedAtT === null) return { winner: "A", tiebreak: "keep-kill" };
+  if (A.keepDestroyedAtT !== null && B.keepDestroyedAtT !== null) {
+    if (A.keepDestroyedAtT === B.keepDestroyedAtT) return { winner: "draw", tiebreak: "mutual-destruction-same-tick" };
+    // outlasted the other by ticks
+    return { winner: A.keepDestroyedAtT > B.keepDestroyedAtT ? "A" : "B", tiebreak: "mutual-destruction-timing" };
+  }
+  const aTowersTaken = B.stats.towersLost;
+  const bTowersTaken = A.stats.towersLost;
+  if (aTowersTaken !== bTowersTaken) {
+    return { winner: aTowersTaken > bTowersTaken ? "A" : "B", tiebreak: "towers-destroyed" };
+  }
+  const aKeepPct = currentHP(A.keep, content.ECONOMY.duration, content) / content.DEFENSE.keep.hp;
+  const bKeepPct = currentHP(B.keep, content.ECONOMY.duration, content) / content.DEFENSE.keep.hp;
+  if (aKeepPct !== bKeepPct) return { winner: aKeepPct > bKeepPct ? "A" : "B", tiebreak: "own-keep-hp-pct" };
+  return { winner: "draw", tiebreak: "true-draw" };
+}
+
+module.exports = { simulate, initPlayer, startRepair, damagedStructure, currentHP, ceiling, determineWinner };

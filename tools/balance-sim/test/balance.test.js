@@ -99,11 +99,14 @@ test("pacing: mirror matchups (fair fights) land inside the 120-360s target wind
 // full history of what was tried before this worked. Threshold is 0.7, not
 // 0.5: testing showed a purely passive "def" (never attacks until its wall
 // order is done) losing comfortably to an active "atk" is expected and
-// healthy, not the unanswered-snowball pathology this test exists to catch
-// (eco's margin against both other strategies sits at 22-46%, well inside
-// even the stricter old threshold — raising this doesn't mask that class
-// of bug, it just stops flagging "passive loses to active" as if it were one).
-test("balance: no single strategy should dominate every matchup it's in", () => {
+// healthy, not the unanswered-snowball pathology this test exists to catch.
+// NOTE: since commander passives were added, no matchup ends in an outright
+// keep-kill anymore (see docs/PROGRESS.md's open balance question) — so
+// this specific check is currently dormant (its precondition never fires).
+// Left in place rather than deleted: it reactivates automatically the
+// moment any future content change produces a kill again, which is exactly
+// when a dominance regression would first show up.
+test("balance: no single strategy should dominate every matchup it's in (via keep-kill)", () => {
   const DOMINANCE_KEEP_HP_RATIO = 0.7;
   for (const [a, b] of MATCHUPS) {
     if (a === b) continue;
@@ -138,6 +141,25 @@ test("per-troop sanity: no single troop type causes an instant collapse or a no-
       const keepHP = currentHP(B.keep, content.ECONOMY.duration, content);
       assert.ok(keepHP >= 0 && Number.isFinite(keepHP), `${troopKey}: defender keepHP invalid: ${keepHP}`);
     }
+  }
+});
+
+// Most matches will hit this path, not just in this tool: real players make
+// mixed, imperfect decisions, so time-up is a normal outcome, not an edge
+// case. Every matchup must resolve to a well-formed result, and a mirror
+// matchup (already proven symmetric above) must always draw — if it didn't,
+// the tiebreak logic itself would be asymmetric even though the underlying
+// match state is identical.
+test("time-up: every matchup resolves to a well-formed winner/tiebreak, mirrors always draw", () => {
+  const validTiebreaks = new Set([
+    "keep-kill", "mutual-destruction-same-tick", "mutual-destruction-timing",
+    "towers-destroyed", "own-keep-hp-pct", "true-draw",
+  ]);
+  for (const [a, b] of MATCHUPS) {
+    const { result } = run(a, b);
+    assert.ok(["A", "B", "draw"].includes(result.winner), `${a} vs ${b}: invalid winner "${result.winner}"`);
+    assert.ok(validTiebreaks.has(result.tiebreak), `${a} vs ${b}: unknown tiebreak "${result.tiebreak}"`);
+    if (a === b) assert.equal(result.winner, "draw", `${a} mirror matchup should always draw, got ${result.winner}`);
   }
 });
 
