@@ -170,6 +170,79 @@ test("structures trade damage over time — never instant, either direction", ()
 // If this test fails, the model doesn't actually reward positioning skill
 // and the whole design premise is wrong, not just this test.
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Walls must be real obstacles, not just another target that happens to sit
+// near the front line. Without physical blocking, "build a wall" would be
+// purely cosmetic — an attacker could walk straight past one to whatever's
+// behind it and the wall would never even take a hit.
+// ---------------------------------------------------------------------------
+test("a solid wall physically blocks the path and forces a fight there first", () => {
+  const b = new Battle();
+  const wall = b.addStructure({
+    side: "B", x: 0, z: 0, hp: 200, dps: 5, range: 1.0, key: "wall",
+    blockRect: { minX: -3, maxX: 3, minZ: -0.5, maxZ: 0.5 },
+  });
+  const keep = b.addStructure({ side: "B", x: 0, z: 5, ...STRUCTURE_PROFILES.keep });
+  const attacker = b.addUnit({ side: "A", x: 0, z: -10, ...UNIT_PROFILES.tank });
+  b.moveUnit(attacker, 0, 5); // straight line — would pass right through the wall's footprint
+
+  let ticks = 0;
+  while (b.units.get(attacker).alive && !b.structures.get(wall).destroyed && ticks < 4000) {
+    b.step(); ticks++;
+  }
+
+  assert.equal(b.structures.get(wall).destroyed, true, "the tank should have broken through the wall eventually");
+  assert.equal(b.structures.get(keep).hp, STRUCTURE_PROFILES.keep.hp, "the keep behind the wall must be untouched — the attacker never got past the wall to it");
+  const finalZ = b.units.get(attacker).z;
+  assert.ok(finalZ < 0.6, `the attacker should have been stopped at the wall's face (z≈0), not have crossed it (ended at z=${finalZ})`);
+});
+
+test("a gap between wall segments lets an attacker bypass them entirely", () => {
+  const b = new Battle();
+  // two segments with a real gap at x=0, mirroring the client's actual
+  // layout (client/src/scene.ts: two wall segments, not one continuous wall)
+  const wallLeft = b.addStructure({
+    side: "B", x: -2.2, z: 0, hp: 200, dps: 5, range: 1.0, key: "wallLeft",
+    blockRect: { minX: -4.2, maxX: -0.2, minZ: -0.5, maxZ: 0.5 },
+  });
+  const wallRight = b.addStructure({
+    side: "B", x: 2.2, z: 0, hp: 200, dps: 5, range: 1.0, key: "wallRight",
+    blockRect: { minX: 0.2, maxX: 4.2, minZ: -0.5, maxZ: 0.5 },
+  });
+  const keep = b.addStructure({ side: "B", x: 0, z: 5, ...STRUCTURE_PROFILES.keep });
+  const attacker = b.addUnit({ side: "A", x: 0, z: -10, ...UNIT_PROFILES.tank });
+  b.moveUnit(attacker, 0, 5); // straight through the gap at x=0
+
+  let ticks = 0;
+  while (b.units.get(attacker).alive && !b.structures.get(keep).destroyed && ticks < 4000) {
+    b.step(); ticks++;
+  }
+
+  assert.equal(b.structures.get(wallLeft).destroyed, false, "flanking through the gap should never touch either wall segment");
+  assert.equal(b.structures.get(wallRight).destroyed, false, "flanking through the gap should never touch either wall segment");
+  assert.ok(b.structures.get(keep).hp < STRUCTURE_PROFILES.keep.hp, "the attacker should have reached the keep unopposed and be damaging it");
+});
+
+test("once a blocking wall falls, the original order resumes automatically", () => {
+  const b = new Battle();
+  const wall = b.addStructure({
+    side: "B", x: 0, z: 0, hp: 40, dps: 0, range: 1.0, key: "wall", // dps=0: dies fast, doesn't hurt the tank
+    blockRect: { minX: -3, maxX: 3, minZ: -0.5, maxZ: 0.5 },
+  });
+  const attacker = b.addUnit({ side: "A", x: 0, z: -10, ...UNIT_PROFILES.tank });
+  b.moveUnit(attacker, 0, 5); // one single order, issued once, never touched again
+
+  let ticks = 0;
+  while (!b.structures.get(wall).destroyed && ticks < 4000) { b.step(); ticks++; }
+  assert.equal(b.structures.get(wall).destroyed, true, "the wall should have fallen");
+
+  const zAtWallFall = b.units.get(attacker).z;
+  for (let i = 0; i < 40; i++) b.step(); // keep running with no new orders at all
+  const zLater = b.units.get(attacker).z;
+
+  assert.ok(zLater > zAtWallFall + 1, "the SAME original order should carry the unit onward past the fallen wall, unprompted");
+});
+
 test("tactics: standing still loses, kiting the same matchup wins", () => {
   // baseline: both just sit in range of each other
   const stand = new Battle();

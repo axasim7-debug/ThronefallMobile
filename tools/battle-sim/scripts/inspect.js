@@ -110,3 +110,39 @@ console.log("\n--- kiting: full trace ---");
   console.log(`  ranged: alive=${r.alive} hp=${r.hp.toFixed(1)}/${UNIT_PROFILES.ranged.hp}   tank: alive=${t.alive} hp=${t.hp.toFixed(1)}/${UNIT_PROFILES.tank.hp}`);
   console.log(`  closest the tank ever got: ${closestApproach.toFixed(2)} (its melee range is ${UNIT_PROFILES.tank.range})`);
 }
+
+console.log("\n--- wall blocking: position trace ---");
+{
+  const b = new Battle();
+  const wall = b.addStructure({
+    side: "B", x: 0, z: 0, hp: 200, dps: 5, range: 1.0, key: "wall",
+    blockRect: { minX: -3, maxX: 3, minZ: -0.5, maxZ: 0.5 },
+  });
+  const attacker = b.addUnit({ side: "A", x: 0, z: -10, ...UNIT_PROFILES.tank });
+  b.moveUnit(attacker, 0, 5);
+  const trace = [];
+  for (let i = 0; i < 60 && !b.structures.get(wall).destroyed; i++) {
+    b.step();
+    if (i % 5 === 0) trace.push(`t=${b.time.toFixed(1)} z=${b.units.get(attacker).z.toFixed(2)} wallHp=${b.structures.get(wall).hp.toFixed(0)}`);
+  }
+  console.log(trace.join("\n"));
+  console.log(`final: wall destroyed=${b.structures.get(wall).destroyed}, attacker z=${b.units.get(attacker).z.toFixed(2)} (approached from z=-10, wall face at z=0)`);
+}
+
+console.log("\n--- resume-after-wall-falls: position trace ---");
+{
+  const b = new Battle();
+  const wall = b.addStructure({
+    side: "B", x: 0, z: 0, hp: 40, dps: 0, range: 1.0, key: "wall",
+    blockRect: { minX: -3, maxX: 3, minZ: -0.5, maxZ: 0.5 },
+  });
+  const attacker = b.addUnit({ side: "A", x: 0, z: -10, ...UNIT_PROFILES.tank });
+  b.moveUnit(attacker, 0, 5);
+  let fellAt = null;
+  for (let i = 0; i < 100; i++) {
+    b.step();
+    if (fellAt === null && b.structures.get(wall).destroyed) fellAt = { t: b.time, z: b.units.get(attacker).z };
+  }
+  console.log(`wall fell at t=${fellAt.t.toFixed(2)}, attacker z at that moment=${fellAt.z.toFixed(2)}`);
+  console.log(`attacker z 40 ticks later=${b.units.get(attacker).z.toFixed(2)} (waypoint target was z=5, never re-issued)`);
+}
