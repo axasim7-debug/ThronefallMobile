@@ -19,11 +19,11 @@ const ECO = {
 
 const DEF = {
   name: "def",
-  decide(pl, content) {
+  decide(pl, content, t) {
     const { wall, barracks } = content.BUILDINGS;
     // repairs only compete for the idle build slot once the initial
     // wall -> barracks order is done, so they never preempt reaching barracks
-    if (pl.hasBarracks && startRepair(pl, content)) return;
+    if (pl.hasBarracks && startRepair(pl, content, t)) return;
     if (pl.wallMaxHP < wall.maxSegments * wall.hpPerSegment && pl.gold >= wall.cost) {
       pl.wallMaxHP += wall.hpPerSegment;
       pl.gold -= wall.cost; pl.buildBusy = "wall"; pl.buildTimer = wall.buildTime; return;

@@ -20,6 +20,14 @@ const BUILDINGS = {
 
 // Baseline defense every player starts a match with (not built in-match —
 // this is the loadout; meta-progression can raise these later).
+//
+// REINFORCEMENT: towers/keep do not start at full HP. Their effective HP
+// ceiling ramps from `startFraction` of max up to 100% over `rampSeconds`,
+// unmanned/unreinforced early on. This is the fix for the "economy-first
+// never takes real risk" issue found in tools/balance-sim testing (see
+// docs/PROGRESS.md): a fresh, un-reinforced defense is genuinely softer in
+// the first ~90s, so an early army has a real window to punish a slow
+// start — not just late-game siege power once both sides are maxed out.
 const DEFENSE = {
   towerCount: 2,
   tower: { hp: 700, dps: 20, engageTime: 5 },
@@ -27,6 +35,7 @@ const DEFENSE = {
   // a lane whose own tower has already fallen
   crossFireFactor: 0.45,
   keep: { hp: 1200, dps: 30, engageTime: 1.5 },
+  reinforce: { startFraction: 0.35, rampSeconds: 90 },
 };
 
 // Repair: rebuilds a damaged wall/tower. cost/time scale with missing HP.

@@ -3,8 +3,22 @@
 // need to change when new troops/heroes/buildings are added — those go in
 // content.js, and new build-order archetypes go in strategies.js.
 
-function freshTower(content) {
-  return { hp: content.DEFENSE.tower.hp, maxHp: content.DEFENSE.tower.hp };
+// Reinforcement: a structure's effective HP ceiling ramps from
+// startFraction*maxHp up to maxHp over rampSeconds. Structures never start
+// fully manned — see content.js DEFENSE.reinforce for the rationale.
+function ceiling(maxHp, t, content) {
+  const { startFraction, rampSeconds } = content.DEFENSE.reinforce;
+  const progress = Math.min(1, t / rampSeconds);
+  return maxHp * (startFraction + (1 - startFraction) * progress);
+}
+
+function currentHP(structure, t, content) {
+  if (structure.destroyed) return 0;
+  return Math.max(0, ceiling(structure.maxHp, t, content) - structure.damageTaken);
+}
+
+function freshStructure(maxHp) {
+  return { maxHp, damageTaken: 0, destroyed: false };
 }
 
 function initPlayer(strategy, content) {
@@ -23,8 +37,8 @@ function initPlayer(strategy, content) {
     troopKey: null,
     troopsProduced: 0,
     armyValue: 0,
-    towers: Array.from({ length: content.DEFENSE.towerCount }, () => freshTower(content)),
-    keepHP: content.DEFENSE.keep.hp,
+    towers: Array.from({ length: content.DEFENSE.towerCount }, () => freshStructure(content.DEFENSE.tower.hp)),
+    keep: freshStructure(content.DEFENSE.keep.hp),
     keepDestroyedAtT: null,
     _repairTarget: null,
     stats: { diedAtWall: 0, stoppedAtTower: 0, reachedKeep: 0, towersLost: 0, repairsDone: 0 },
@@ -33,15 +47,15 @@ function initPlayer(strategy, content) {
   };
 }
 
-function damagedStructure(pl) {
+function damagedStructure(pl, t, content) {
   if (pl.wallMaxHP > 0 && pl.wallHP < pl.wallMaxHP) return "wall";
-  const t = pl.towers.find((t) => t.hp < t.maxHp);
-  if (t) return t;
+  const t1 = pl.towers.find((s) => currentHP(s, t, content) < ceiling(s.maxHp, t, content));
+  if (t1) return t1;
   return null;
 }
 
-function startRepair(pl, content) {
-  const need = damagedStructure(pl);
+function startRepair(pl, content, t) {
+  const need = damagedStructure(pl, t, content);
   if (!need) return false;
   const { costPerMissingHP, timePerMissingHP } = content.REPAIR;
   if (need === "wall") {
@@ -51,7 +65,7 @@ function startRepair(pl, content) {
     pl.gold -= cost; pl.buildBusy = "repairWall"; pl.buildTimer = Math.ceil(missing * timePerMissingHP);
     return true;
   }
-  const missing = need.maxHp - need.hp;
+  const missing = ceiling(need.maxHp, t, content) - currentHP(need, t, content);
   const cost = Math.ceil(missing * costPerMissingHP);
   if (pl.gold < cost) return false;
   pl.gold -= cost; pl.buildBusy = "repairTower"; pl.buildTimer = Math.ceil(missing * timePerMissingHP);
@@ -65,6 +79,11 @@ function startTroop(pl, content, troopKey) {
   if (pl.gold < troop.cost) return false;
   pl.gold -= troop.cost; pl.troopBusy = true; pl.troopTimer = troop.buildTime; pl.troopKey = troopKey;
   return true;
+}
+
+function damageStructure(structure, dmg, t, content) {
+  structure.damageTaken += dmg;
+  if (!structure.destroyed && currentHP(structure, t, content) <= 0) structure.destroyed = true;
 }
 
 function resolveAttack(defender, troop, content, t) {
@@ -81,19 +100,18 @@ function resolveAttack(defender, troop, content, t) {
     if (hp <= 0) { defender.stats.diedAtWall++; return; }
   }
 
-  const alive = defender.towers.filter((t) => t.hp > 0);
+  const alive = defender.towers.filter((s) => !s.destroyed);
   if (alive.length > 0) {
-    const primary = alive.reduce((a, b) => (a.hp <= b.hp ? a : b));
-    const wasAlive = primary.hp > 0;
+    const primary = alive.reduce((a, b) => (currentHP(a, t, content) <= currentHP(b, t, content) ? a : b));
     const dmgToTroop = tower.dps * tower.engageTime;
     const dmgToTower = troop.dps * tower.engageTime;
-    primary.hp = Math.max(0, primary.hp - dmgToTower);
-    if (wasAlive && primary.hp === 0) defender.stats.towersLost++;
+    damageStructure(primary, dmgToTower, t, content);
+    if (primary.destroyed) defender.stats.towersLost++;
     hp -= dmgToTroop;
-    if (hp <= 0 || primary.hp > 0) { defender.stats.stoppedAtTower++; return; }
+    if (hp <= 0 || !primary.destroyed) { defender.stats.stoppedAtTower++; return; }
   }
 
-  const survivors = defender.towers.filter((t) => t.hp > 0);
+  const survivors = defender.towers.filter((s) => !s.destroyed);
   if (survivors.length > 0) {
     hp -= tower.dps * crossFireFactor * tower.engageTime;
     if (hp <= 0) { defender.stats.stoppedAtTower++; return; }
@@ -102,8 +120,8 @@ function resolveAttack(defender, troop, content, t) {
   if (hp > 0) {
     defender.stats.reachedKeep++;
     const dmgToKeep = troop.dps * keep.engageTime;
-    defender.keepHP = Math.max(0, defender.keepHP - dmgToKeep);
-    if (defender.keepHP <= 0 && defender.keepDestroyedAtT === null) defender.keepDestroyedAtT = t;
+    damageStructure(defender.keep, dmgToKeep, t, content);
+    if (defender.keep.destroyed && defender.keepDestroyedAtT === null) defender.keepDestroyedAtT = t;
   }
 }
 
@@ -113,7 +131,6 @@ function advanceBuild(pl, content, t) {
   if (pl.buildTimer > 0) return;
   switch (pl.buildBusy) {
     case "farm": {
-      const idx = pl.farms.length;
       pl.farms.push({ hp: content.BUILDINGS.farm.hp });
       pl.income += content.BUILDINGS.farm.incomeBonus;
       break;
@@ -130,7 +147,8 @@ function advanceBuild(pl, content, t) {
       pl.stats.repairsDone++;
       break;
     case "repairTower":
-      pl._repairTarget.hp = pl._repairTarget.maxHp;
+      pl._repairTarget.damageTaken = 0;
+      pl._repairTarget.destroyed = false;
       pl._repairTarget = null;
       pl.stats.repairsDone++;
       break;
@@ -186,11 +204,11 @@ function simulate(stratA, stratB, content) {
     }
 
     if (A.keepDestroyedAtT === null) {
-      if (!A.buildBusy) stratA.decide(A, content);
+      if (!A.buildBusy) stratA.decide(A, content, t);
       if (!A.troopBusy) startTroop(A, content, (stratA.pickTroop && stratA.pickTroop(A, content)) || "t1");
     }
     if (B.keepDestroyedAtT === null) {
-      if (!B.buildBusy) stratB.decide(B, content);
+      if (!B.buildBusy) stratB.decide(B, content, t);
       if (!B.troopBusy) startTroop(B, content, (stratB.pickTroop && stratB.pickTroop(B, content)) || "t1");
     }
   }
@@ -198,4 +216,4 @@ function simulate(stratA, stratB, content) {
   return { A, B };
 }
 
-module.exports = { simulate, initPlayer, startRepair, damagedStructure };
+module.exports = { simulate, initPlayer, startRepair, damagedStructure, currentHP, ceiling };

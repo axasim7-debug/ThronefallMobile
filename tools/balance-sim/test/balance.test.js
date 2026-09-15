@@ -10,7 +10,7 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { simulate } = require("../src/engine");
+const { simulate, currentHP } = require("../src/engine");
 const { ALL } = require("../src/strategies");
 const content = require("../src/content");
 
@@ -38,8 +38,9 @@ test("sanity: no negative gold / HP, no NaN, across all matchups", () => {
     const { A, B } = run(a, b);
     for (const pl of [A, B]) {
       assert.ok(pl.gold >= 0 && Number.isFinite(pl.gold), `${pl.strategy} gold invalid: ${pl.gold}`);
-      assert.ok(pl.keepHP >= 0 && Number.isFinite(pl.keepHP), `${pl.strategy} keepHP invalid: ${pl.keepHP}`);
-      for (const t of pl.towers) assert.ok(t.hp >= 0, `${pl.strategy} tower HP went negative`);
+      const keepHP = currentHP(pl.keep, content.ECONOMY.duration, content);
+      assert.ok(keepHP >= 0 && Number.isFinite(keepHP), `${pl.strategy} keepHP invalid: ${keepHP}`);
+      for (const s of pl.towers) assert.ok(currentHP(s, content.ECONOMY.duration, content) >= 0, `${pl.strategy} tower HP went negative`);
     }
   }
 });
@@ -87,7 +88,7 @@ test("balance: no single strategy should dominate every matchup it's in", { todo
     const { A, B } = run(a, b);
     for (const [winner, loser] of [[A, B], [B, A]]) {
       if (loser.keepDestroyedAtT === null || winner.keepDestroyedAtT !== null) continue;
-      const ratio = winner.keepHP / content.DEFENSE.keep.hp;
+      const ratio = currentHP(winner.keep, content.ECONOMY.duration, content) / content.DEFENSE.keep.hp;
       assert.ok(ratio <= DOMINANCE_KEEP_HP_RATIO,
         `${winner.strategy} beat ${loser.strategy} while keeping ${(ratio * 100).toFixed(0)}% ` +
         `of its own keep HP — one-sided result`);
