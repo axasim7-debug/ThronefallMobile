@@ -67,4 +67,13 @@ public sealed class PlayerState
     public int? FirstTroopT { get; set; }
 }
 
-public sealed record MarchingTroop(int ArriveAt, double Hp, double Dps, string[]? Bypasses, IReadOnlyDictionary<string, double>? DamageProfile, double DefenseResistFactor);
+// TroopKey and DepartedAt exist for the client only — combat resolution never
+// reads them (it works off Hp/Dps/Bypasses/DamageProfile/DefenseResistFactor,
+// already resolved with every commander bonus baked in). They're what let a
+// snapshot report "this troop is 40% of the way there" instead of a unit that
+// teleports from produced to arrived — see docs/ART_DIRECTION.md's opening
+// finding: without this, nothing on the battlefield could ever be shown to
+// move, however good the art was.
+public sealed record MarchingTroop(
+    string TroopKey, int DepartedAt, int ArriveAt, double Hp, double Dps,
+    string[]? Bypasses, IReadOnlyDictionary<string, double>? DamageProfile, double DefenseResistFactor);

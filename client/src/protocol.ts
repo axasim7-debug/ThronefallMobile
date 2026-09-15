@@ -17,6 +17,13 @@ export interface FarmView {
   incomeRemoved: boolean;
 }
 
+/** progress: 0 at departure, 1 at arrival (never actually observed — the
+ * troop resolves and disappears within the tick it would reach 1). */
+export interface MarchingTroopView {
+  troopKey: string;
+  progress: number;
+}
+
 export interface CommanderView {
   key: string;
   rage: number;
@@ -48,6 +55,8 @@ export interface SideView {
   commanders: CommanderView[];
   towersLost: number;
   farmsRaided: number;
+  /** troops THIS side sent, still in flight toward the opponent */
+  marchingTroops: MarchingTroopView[];
 }
 
 export interface MatchState {

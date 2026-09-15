@@ -219,7 +219,7 @@ public static class MatchEngine
         // never resolve. Found and fixed in the JS port first — see
         // tools/balance-sim/src/engine.js's matching comment.
         var arriveAt = t + (int)Math.Round(marchTime, MidpointRounding.AwayFromZero);
-        onSpawn(new MarchingTroop(arriveAt, hp, dps, troopDef.Bypasses, troopDef.DamageProfile, resistFactor));
+        onSpawn(new MarchingTroop(pl.TroopKey!, t, arriveAt, hp, dps, troopDef.Bypasses, troopDef.DamageProfile, resistFactor));
     }
 
     // ---- combat ----

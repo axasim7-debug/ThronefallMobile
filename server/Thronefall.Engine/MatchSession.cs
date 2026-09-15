@@ -77,9 +77,15 @@ public sealed class MatchSession
 
         // 1. arrivals
         if (_arrivalsToA.TryGetValue(t, out var arrA))
+        {
             foreach (var troop in arrA) MatchEngine.ResolveAttack(A, troop, t);
+            _arrivalsToA.Remove(t); // resolved; keeps InFlightFrom's scan bounded
+        }
         if (_arrivalsToB.TryGetValue(t, out var arrB))
+        {
             foreach (var troop in arrB) MatchEngine.ResolveAttack(B, troop, t);
+            _arrivalsToB.Remove(t);
+        }
 
         if (t > 0)
         {
@@ -140,5 +146,18 @@ public sealed class MatchSession
     public void RunToCompletion()
     {
         while (Step()) { }
+    }
+
+    /// <summary>
+    /// Troops this side has sent that have not yet arrived — what a snapshot
+    /// needs to draw units on the battlefield instead of two static bases.
+    /// A's outgoing troops live in _arrivalsToB (they're queued by
+    /// destination, not by sender), so this reads the other side's inbox and
+    /// keeps everything still keyed by future arrival tick.
+    /// </summary>
+    public IReadOnlyList<MarchingTroop> InFlightFrom(bool fromA)
+    {
+        var inbox = fromA ? _arrivalsToB : _arrivalsToA;
+        return inbox.Where(kv => kv.Key > Tick).SelectMany(kv => kv.Value).ToList();
     }
 }
