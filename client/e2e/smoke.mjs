@@ -3,6 +3,16 @@
 // phone size, against the real server. Plays a match through to its result and
 // fails loudly on any console error.
 //
+// The tamper probe sends a raw WebSocket frame with a nonsense troop key
+// rather than clicking a disabled UI button. That was tried first and was
+// genuinely flaky against the "atk" opponent: "repair" is only illegal while
+// nothing of yours is damaged, and atk's first troop can land as early as
+// tick ~34 — a slow evaluate() or console.log in the probe was sometimes
+// enough real time, at high --speed, to land after that. A nonsense key is
+// illegal for the entire match regardless of opponent or timing, which is
+// what the probe is actually supposed to prove: the server, not any client
+// state, decides.
+//
 // This is what "tested" means for the client — `npm run build` only proves it
 // compiles. It also produces before/after screenshots, which is what makes it
 // worth keeping through the art pass.
@@ -76,6 +86,16 @@ page.on("pageerror", (e) => errors.push(`pageerror: ${e.message}`));
 
 const shot = (name) => (shotDir ? page.screenshot({ path: `${shotDir}/${name}.png` }) : Promise.resolve());
 
+await page.addInitScript(() => {
+  const Native = window.WebSocket;
+  window.WebSocket = function (...args) {
+    const socket = new Native(...args);
+    window.__thronefallSocket = socket;
+    return socket;
+  };
+  window.WebSocket.prototype = Native.prototype;
+  for (const key of ["CONNECTING", "OPEN", "CLOSING", "CLOSED"]) window.WebSocket[key] = Native[key];
+});
 await page.goto(`${base}/?opponent=${opponent}&speed=${speed}`, { waitUntil: "networkidle" });
 await page.waitForTimeout(600);
 
@@ -91,23 +111,15 @@ console.log("catalog rendered:", JSON.stringify(opening));
 if (opening.troops === 0 || opening.commanders === 0) fail("server catalog never rendered");
 if (opening.clock === "—:—") fail("no state frame arrived");
 
-// A tampered client: force-enable a control and press it anyway. The server
-// must still refuse — the disabled state in the UI is cosmetic, not a gate.
-//
-// This runs before anything slow (screenshots included): "repair" is only
-// guaranteed to be refused while nothing is damaged yet, and once the first
-// enemy troops land it becomes a legitimate order. Ordering this late made the
-// check fail against a server that was behaving correctly.
+// A tampered client: send a command no legitimate button could ever produce.
+// The server must still refuse it on its own authority — nothing here reads
+// or depends on match state, so there is no race with the opponent to avoid.
 const tampered = await page.evaluate(() => {
-  const repair = [...document.querySelectorAll(".builds .action")].find(
-    (b) => b.querySelector(".action-label")?.textContent === "Repair",
-  );
-  if (!repair) return false;
-  repair.disabled = false;
-  repair.click();
+  if (!window.__thronefallSocket) return false;
+  window.__thronefallSocket.send(JSON.stringify({ type: "command", kind: "train", arg: "ghost-knight", seq: 999 }));
   return true;
 });
-if (!tampered) fail("repair control not found");
+if (!tampered) fail("no socket handle to tamper with (did the capture hook not fire?)");
 
 let refused = { shown: false, text: "" };
 for (let i = 0; i < 20 && !refused.shown; i++) {
@@ -119,6 +131,7 @@ for (let i = 0; i < 20 && !refused.shown; i++) {
 }
 console.log("tampered command refused:", JSON.stringify(refused));
 if (!refused.shown) fail("server accepted a command it should have refused (or the refusal never surfaced)");
+if (!refused.text.toLowerCase().includes("unknown")) fail(`unexpected refusal reason: ${refused.text}`);
 
 await shot("01-start");
 
