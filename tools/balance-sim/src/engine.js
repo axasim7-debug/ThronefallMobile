@@ -41,7 +41,7 @@ function initPlayer(strategy, content) {
     keep: freshStructure(content.DEFENSE.keep.hp),
     keepDestroyedAtT: null,
     _repairTarget: null,
-    stats: { diedAtWall: 0, stoppedAtTower: 0, reachedKeep: 0, towersLost: 0, repairsDone: 0 },
+    stats: { diedAtWall: 0, stoppedAtTower: 0, reachedKeep: 0, towersLost: 0, repairsDone: 0, farmsRaided: 0 },
     barracksT: null,
     firstTroopT: null,
   };
@@ -117,12 +117,27 @@ function resolveAttack(defender, troop, content, t) {
     if (hp <= 0) { defender.stats.stoppedAtTower++; return; }
   }
 
-  if (hp > 0) {
-    defender.stats.reachedKeep++;
-    const dmgToKeep = troop.dps * keep.engageTime;
-    damageStructure(defender.keep, dmgToKeep, t, content);
-    if (defender.keep.destroyed && defender.keepDestroyedAtT === null) defender.keepDestroyedAtT = t;
+  if (hp <= 0) return;
+
+  // troops that broke through go after the economy first — an unwalled
+  // farm is a real, undefended target, same as Clash Royale's collector
+  const farm = content.BUILDINGS.farm;
+  const targetFarm = defender.farms.find((f) => f.hp > 0);
+  if (targetFarm) {
+    defender.stats.farmsRaided++;
+    targetFarm.hp = Math.max(0, targetFarm.hp - troop.dps * farm.assaultEngageTime);
+    if (targetFarm.hp === 0 && !targetFarm.incomeRemoved) {
+      defender.income -= farm.incomeBonus;
+      defender.gold = Math.max(0, defender.gold - (farm.goldPenalty || 0));
+      targetFarm.incomeRemoved = true;
+    }
+    return;
   }
+
+  defender.stats.reachedKeep++;
+  const dmgToKeep = troop.dps * keep.engageTime;
+  damageStructure(defender.keep, dmgToKeep, t, content);
+  if (defender.keep.destroyed && defender.keepDestroyedAtT === null) defender.keepDestroyedAtT = t;
 }
 
 function advanceBuild(pl, content, t) {

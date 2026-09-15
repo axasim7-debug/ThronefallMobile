@@ -72,16 +72,11 @@ test("pacing: mirror matchups (fair fights) land inside the 120-360s target wind
   }
 });
 
-// --- known open issue, tracked not hidden ---------------------------------
-// "eco" currently wins every asymmetric matchup with a large margin (see
-// docs/PROGRESS.md, "قضية اقتصاد أولاً المهيمنة"). Diminishing/capped farm
-// returns were tried and did NOT fix it — root cause is that baseline
-// defense (fixed from t=0, same for every strategy) is strong enough that
-// an early rush can never meaningfully punish a slow start. This is a
-// `todo` test, not a passing one: it documents the target we have not hit
-// yet. Once a fix (e.g. defense that starts weaker and reinforces over
-// time) is implemented and tested, promote this to a real assertion.
-test("balance: no single strategy should dominate every matchup it's in", { todo: "open issue — see docs/PROGRESS.md" }, () => {
+// Promoted from `todo` to a real assertion once the fix landed: farms are
+// a real attack target (BUILDINGS.farm.goldPenalty claws back banked gold,
+// not just future income, when raided) — see docs/PROGRESS.md for the full
+// history of what was tried before this worked.
+test("balance: no single strategy should dominate every matchup it's in", () => {
   const DOMINANCE_KEEP_HP_RATIO = 0.5; // winner should not keep >50% HP while fully destroying the loser
   for (const [a, b] of MATCHUPS) {
     if (a === b) continue;

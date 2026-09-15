@@ -10,7 +10,16 @@ const ECONOMY = {
 };
 
 const BUILDINGS = {
-  farm: { cost: 150, buildTime: 8, incomeBonus: 5, hp: 150, maxCount: 2 },
+  // farms are a real attack target (like Clash Royale's Elixir Collector):
+  // troops that clear the wall+towers burn the nearest surviving farm
+  // before they ever reach the keep. Destroying one does two things, not
+  // one: removes its future income (as you'd expect), AND claws back a
+  // lump of already-banked gold (goldPenalty — a "sacked treasury").
+  // Testing showed future-income-loss alone barely moved outcomes: by the
+  // time a farm falls, its owner has already banked most of the benefit,
+  // so only a retroactive penalty actually offsets a head start economy
+  // race. See docs/PROGRESS.md for the full reasoning.
+  farm: { cost: 150, buildTime: 8, incomeBonus: 5, hp: 60, goldPenalty: 150, maxCount: 2, assaultEngageTime: 2 },
   barracks: { cost: 200, buildTime: 12 },
   wall: {
     cost: 80, buildTime: 5, hpPerSegment: 120, maxSegments: 2,
