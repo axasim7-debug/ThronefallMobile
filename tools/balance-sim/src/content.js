@@ -140,6 +140,9 @@ function amountCurve(level5Amount) { // for a flat effect magnitude (rage skill 
 const COMMANDERS = {
   warlord: {
     name: "القائد المدمّر — الهجمة الكاسحة",
+    // unlock order as the commander's own XP level rises (not modeled here
+    // — see comment above); each of these 4 still levels 1-5 independently
+    skillOrder: ["rage", "troopDpsBonus", "troopDpsBonus2", "rageEffectBonus"],
     rageCost: 6,
     rageEffect: { kind: "damageStructure", target: "enemyTower", amountByLevel: amountCurve(320) },
     passives: {
@@ -151,6 +154,7 @@ const COMMANDERS = {
   },
   guardian: {
     name: "الحارسة — الدرع الحصين",
+    skillOrder: ["rage", "troopHpBonus", "structureDamageTakenMult", "rageEffectBonus"],
     rageCost: 6,
     rageEffect: { kind: "repairStructure", target: "ownDamaged", amountByLevel: amountCurve(260) },
     passives: {
@@ -162,6 +166,7 @@ const COMMANDERS = {
   },
   shadow: {
     name: "الظل — الغارة الخاطفة",
+    skillOrder: ["rage", "marchTimeMult", "infiltratorResistMult", "rageEffectBonus"],
     rageCost: 6,
     rageEffect: { kind: "damageStructure", target: "enemyFarm", amountByLevel: amountCurve(200) },
     passives: {

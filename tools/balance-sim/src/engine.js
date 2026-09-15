@@ -54,11 +54,26 @@ function initPlayer(strategy, content, squad) {
     keep: freshStructure(content.DEFENSE.keep.hp),
     keepDestroyedAtT: null,
     _repairTarget: null,
-    // squad entries are either a bare key ("warlord" — defaults to level 5,
-    // unmastered) or { key, level (1-5), mastered } for a specific loadout
+    // Each of a commander's 4 skills (the rage skill + 3 passives) has its
+    // OWN independent 1-5 level — they are separate upgrade tracks, not one
+    // shared "commander level" (a commander's overall XP level is a
+    // separate, real system that only gates which skills are unlocked at
+    // all; it doesn't scale power directly, so this tool — which tests
+    // combat balance for a given loadout, not the XP grind — doesn't model
+    // it). Mastery is NOT a flag to set: it's simply what "all 4 at level 5
+    // simultaneously" means, computed on the fly wherever it matters.
+    //
+    // squad entries: a bare key ("warlord" — defaults every skill to level
+    // 3, a representative "invested some, not maxed" loadout) or
+    // { key, levels: { rage, <passiveKey1>, <passiveKey2>, <passiveKey3> } }
+    // for a specific one — see content.js COMMANDERS[key].skillOrder for
+    // the 4 keys a commander expects.
     commanders: (squad || []).map((entry) => {
       const e = typeof entry === "string" ? { key: entry } : entry;
-      return { key: e.key, level: e.level ?? 5, mastered: e.mastered ?? false, rage: 0, casts: 0 };
+      const order = content.COMMANDERS[e.key].skillOrder;
+      const levels = {};
+      for (const skill of order) levels[skill] = e.levels?.[skill] ?? 3;
+      return { key: e.key, levels, rage: 0, casts: 0 };
     }),
     stats: { diedAtWall: 0, stoppedAtTower: 0, reachedKeep: 0, towersLost: 0, repairsDone: 0, farmsRaided: 0 },
     barracksT: null,
@@ -123,7 +138,13 @@ function guardianDamageMult(pl, content) {
   const cmd = pl.commanders.find((c) => c.key === "guardian");
   if (!cmd) return 1;
   const p = content.COMMANDERS.guardian.passives.structureDamageTakenMult;
-  return p ? atLevel(p.multByLevel, cmd.level) : 1;
+  return p ? atLevel(p.multByLevel, cmd.levels.structureDamageTakenMult) : 1;
+}
+
+// mastery is not a flag — it's simply "every one of this commander's 4
+// skills happens to be at level 5 right now"
+function isMastered(cmd) {
+  return Object.values(cmd.levels).every((l) => l >= 5);
 }
 
 function resolveAttack(defender, troop, content, t) {
@@ -240,11 +261,11 @@ function advanceTroop(pl, content, t, onSpawn) {
   for (const cmd of pl.commanders) {
     const p = content.COMMANDERS[cmd.key].passives;
     if (!p) continue;
-    if (p.troopDpsBonus && p.troopDpsBonus.troop === pl.troopKey) dps *= atLevel(p.troopDpsBonus.multByLevel, cmd.level);
-    if (p.troopDpsBonus2 && p.troopDpsBonus2.troop === pl.troopKey) dps *= atLevel(p.troopDpsBonus2.multByLevel, cmd.level);
-    if (p.troopHpBonus && p.troopHpBonus.troop === pl.troopKey) hp *= atLevel(p.troopHpBonus.multByLevel, cmd.level);
-    if (p.marchTimeMult && p.marchTimeMult.troops.includes(pl.troopKey)) marchTime *= atLevel(p.marchTimeMult.multByLevel, cmd.level);
-    if (p.infiltratorResistMult && p.infiltratorResistMult.troops.includes(pl.troopKey)) resistFactor *= atLevel(p.infiltratorResistMult.multByLevel, cmd.level);
+    if (p.troopDpsBonus && p.troopDpsBonus.troop === pl.troopKey) dps *= atLevel(p.troopDpsBonus.multByLevel, cmd.levels.troopDpsBonus);
+    if (p.troopDpsBonus2 && p.troopDpsBonus2.troop === pl.troopKey) dps *= atLevel(p.troopDpsBonus2.multByLevel, cmd.levels.troopDpsBonus2);
+    if (p.troopHpBonus && p.troopHpBonus.troop === pl.troopKey) hp *= atLevel(p.troopHpBonus.multByLevel, cmd.levels.troopHpBonus);
+    if (p.marchTimeMult && p.marchTimeMult.troops.includes(pl.troopKey)) marchTime *= atLevel(p.marchTimeMult.multByLevel, cmd.levels.marchTimeMult);
+    if (p.infiltratorResistMult && p.infiltratorResistMult.troops.includes(pl.troopKey)) resistFactor *= atLevel(p.infiltratorResistMult.multByLevel, cmd.levels.infiltratorResistMult);
   }
 
   onSpawn({
@@ -298,9 +319,9 @@ function decideCommanderCasts(self, opponent, content, t) {
     // is fully mastered — one further mastery multiplier. None of this
     // touches how OFTEN it can fire (see passives block comment in
     // content.js: that line must never move).
-    let amount = atLevel(def.rageEffect.amountByLevel, cmd.level);
-    if (def.passives?.rageEffectBonus) amount *= atLevel(def.passives.rageEffectBonus.multByLevel, cmd.level);
-    if (cmd.mastered) amount *= def.mastery.rageEffectMultiplier;
+    let amount = atLevel(def.rageEffect.amountByLevel, cmd.levels.rage);
+    if (def.passives?.rageEffectBonus) amount *= atLevel(def.passives.rageEffectBonus.multByLevel, cmd.levels.rageEffectBonus);
+    if (isMastered(cmd)) amount *= def.mastery.rageEffectMultiplier;
     const eff = { ...def.rageEffect, amount };
     pending.push({ self, opponent, eff });
   }
