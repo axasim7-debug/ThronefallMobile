@@ -54,7 +54,12 @@ function initPlayer(strategy, content, squad) {
     keep: freshStructure(content.DEFENSE.keep.hp),
     keepDestroyedAtT: null,
     _repairTarget: null,
-    commanders: (squad || []).map((key) => ({ key, rage: 0, casts: 0 })),
+    // squad entries are either a bare key ("warlord" — defaults to level 5,
+    // unmastered) or { key, level (1-5), mastered } for a specific loadout
+    commanders: (squad || []).map((entry) => {
+      const e = typeof entry === "string" ? { key: entry } : entry;
+      return { key: e.key, level: e.level ?? 5, mastered: e.mastered ?? false, rage: 0, casts: 0 };
+    }),
     stats: { diedAtWall: 0, stoppedAtTower: 0, reachedKeep: 0, towersLost: 0, repairsDone: 0, farmsRaided: 0 },
     barracksT: null,
     firstTroopT: null,
@@ -115,8 +120,10 @@ function resistMult(troop) {
 // "الحارسة" passive: own wall/tower/keep take reduced damage (farms are
 // not covered — her theme is core defenses, not economy buildings)
 function guardianDamageMult(pl, content) {
-  if (!pl.commanders.some((c) => c.key === "guardian")) return 1;
-  return content.COMMANDERS.guardian.passives.structureDamageTakenMult ?? 1;
+  const cmd = pl.commanders.find((c) => c.key === "guardian");
+  if (!cmd) return 1;
+  const p = content.COMMANDERS.guardian.passives.structureDamageTakenMult;
+  return p ? atLevel(p.multByLevel, cmd.level) : 1;
 }
 
 function resolveAttack(defender, troop, content, t) {
@@ -233,11 +240,11 @@ function advanceTroop(pl, content, t, onSpawn) {
   for (const cmd of pl.commanders) {
     const p = content.COMMANDERS[cmd.key].passives;
     if (!p) continue;
-    if (p.troopDpsBonus && p.troopDpsBonus.troop === pl.troopKey) dps *= p.troopDpsBonus.mult;
-    if (p.troopDpsBonus2 && p.troopDpsBonus2.troop === pl.troopKey) dps *= p.troopDpsBonus2.mult;
-    if (p.troopHpBonus && p.troopHpBonus.troop === pl.troopKey) hp *= p.troopHpBonus.mult;
-    if (p.marchTimeMult && p.marchTimeMult.troops.includes(pl.troopKey)) marchTime *= p.marchTimeMult.mult;
-    if (p.infiltratorResistMult && p.infiltratorResistMult.troops.includes(pl.troopKey)) resistFactor *= p.infiltratorResistMult.mult;
+    if (p.troopDpsBonus && p.troopDpsBonus.troop === pl.troopKey) dps *= atLevel(p.troopDpsBonus.multByLevel, cmd.level);
+    if (p.troopDpsBonus2 && p.troopDpsBonus2.troop === pl.troopKey) dps *= atLevel(p.troopDpsBonus2.multByLevel, cmd.level);
+    if (p.troopHpBonus && p.troopHpBonus.troop === pl.troopKey) hp *= atLevel(p.troopHpBonus.multByLevel, cmd.level);
+    if (p.marchTimeMult && p.marchTimeMult.troops.includes(pl.troopKey)) marchTime *= atLevel(p.marchTimeMult.multByLevel, cmd.level);
+    if (p.infiltratorResistMult && p.infiltratorResistMult.troops.includes(pl.troopKey)) resistFactor *= atLevel(p.infiltratorResistMult.multByLevel, cmd.level);
   }
 
   onSpawn({
@@ -247,6 +254,11 @@ function advanceTroop(pl, content, t, onSpawn) {
     damageProfile: troopDef.damageProfile,
     defenseResistFactor: resistFactor,
   });
+}
+
+// index a 5-entry byLevel array with a 1-5 level (clamped)
+function atLevel(byLevel, level) {
+  return byLevel[Math.max(1, Math.min(5, level)) - 1];
 }
 
 // weakest alive structure of a given kind ("tower"/"farm"), or null
@@ -281,11 +293,15 @@ function decideCommanderCasts(self, opponent, content, t) {
     if (targetsEnemy && opponent.keepDestroyedAtT !== null) continue; // nothing left to hit — don't spend rage on a no-op
     cmd.rage -= def.rageCost;
     cmd.casts++;
-    // the caster's own "rageEffectBonus" passive scales the effect
-    // magnitude only — never how often it can fire (see passives block
-    // comment in content.js: that line must never move)
-    const bonus = def.passives?.rageEffectBonus ?? 1;
-    const eff = { ...def.rageEffect, amount: def.rageEffect.amount * bonus };
+    // effect magnitude scales with the skill's own level, the
+    // "rageEffectBonus" passive (also leveled), and — only once the card
+    // is fully mastered — one further mastery multiplier. None of this
+    // touches how OFTEN it can fire (see passives block comment in
+    // content.js: that line must never move).
+    let amount = atLevel(def.rageEffect.amountByLevel, cmd.level);
+    if (def.passives?.rageEffectBonus) amount *= atLevel(def.passives.rageEffectBonus.multByLevel, cmd.level);
+    if (cmd.mastered) amount *= def.mastery.rageEffectMultiplier;
+    const eff = { ...def.rageEffect, amount };
     pending.push({ self, opponent, eff });
   }
   return pending;

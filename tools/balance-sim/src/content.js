@@ -103,50 +103,73 @@ const TROOPS = {
 // building from the remainder.
 const RAGE = { max: 10, fillRatePerSec: 10 / 90 }; // full bar from empty in 90s
 
+// Skill-level curve helpers: every commander stat now scales over 5
+// levels (unlocked progressively as the commander card levels up — see
+// docs/GAME_DESIGN.md §3.3), landing on the single value already
+// balance-tested as its level-5 (maxed, pre-mastery) strength. Level 1 is
+// roughly 40% of the way to that, growing non-linearly toward level 5 —
+// early levels feel like a real step up, not a rounding error.
+const LEVEL_FRACTIONS = [0.4, 0.6, 0.75, 0.9, 1.0];
+function bonusCurve(level5Mult) { // for multipliers > 1 (e.g. +15% dmg)
+  return LEVEL_FRACTIONS.map((f) => 1 + (level5Mult - 1) * f);
+}
+function reductionCurve(level5Mult) { // for multipliers < 1 (e.g. -10% dmg taken)
+  return LEVEL_FRACTIONS.map((f) => 1 - (1 - level5Mult) * f);
+}
+function amountCurve(level5Amount) { // for a flat effect magnitude (rage skill damage/heal)
+  return LEVEL_FRACTIONS.map((f) => Math.round(level5Amount * f));
+}
+
 // Commander cards. Each has exactly ONE manually-triggered ability (the
 // rage skill — the only skill players actively manage) plus 3 passives,
 // always-on stat buffs from the same combat axis as the rage skill. A
 // launch squad fields all 3 commanders.
 //
-// Numbers here are a single representative tier (~mid skill-level), NOT
-// yet the full 1-5 upgrade curve + mastery bonus from docs/GAME_DESIGN.md
-// §3.3 — deliberately deferred until this base shape is proven not to
-// break balance (same "prove the mechanism before the granular curve"
-// order used for the rage economy itself).
+// MASTERY: fully maxing the card (all 4 skills at level 5) unlocks one
+// further jump — but ONLY to the rage skill's own effect magnitude, never
+// a new skill and never the passives. `mastery.rageEffectMultiplier`
+// applies on top of the level-5 amount (further multiplied by the
+// rageEffectBonus passive, also at its level-5 value once mastered).
 //
-// HARD RULE: no passive may touch RAGE.fillRatePerSec or a rageCost. That
-// would let card-leveling speed (which payment CAN accelerate, same as
-// any other card) indirectly buy more skill casts — exactly the loophole
-// the fixed-rate rule exists to close. Passives may only affect combat
-// stats (troop dps/hp/marchTime, structure damage taken) or a rage
-// skill's EFFECT MAGNITUDE once cast, never how often it can be cast.
+// HARD RULE: no passive or level, however high, may touch
+// RAGE.fillRatePerSec or a rageCost. That would let card-leveling speed
+// (which payment CAN accelerate, same as any other card) indirectly buy
+// more skill casts — exactly the loophole the fixed-rate rule exists to
+// close. Levels may only affect combat stats or a rage skill's EFFECT
+// MAGNITUDE once cast, never how often it can be cast.
 const COMMANDERS = {
   warlord: {
     name: "القائد المدمّر — الهجمة الكاسحة",
-    rageCost: 6, rageEffect: { kind: "damageStructure", target: "enemyTower", amount: 320 },
+    rageCost: 6,
+    rageEffect: { kind: "damageStructure", target: "enemyTower", amountByLevel: amountCurve(320) },
     passives: {
-      troopDpsBonus: { troop: "cavalry", mult: 1.15 }, // +15% cavalry damage
-      troopDpsBonus2: { troop: "engineer", mult: 1.15 }, // +15% engineer damage
-      rageEffectBonus: 1.2, // +20% to the rage skill's own damage
+      troopDpsBonus: { troop: "cavalry", multByLevel: bonusCurve(1.15) },
+      troopDpsBonus2: { troop: "engineer", multByLevel: bonusCurve(1.15) },
+      rageEffectBonus: { multByLevel: bonusCurve(1.2) },
     },
+    mastery: { rageEffectMultiplier: 1.15 },
   },
   guardian: {
     name: "الحارسة — الدرع الحصين",
-    rageCost: 6, rageEffect: { kind: "repairStructure", target: "ownDamaged", amount: 260 },
+    rageCost: 6,
+    rageEffect: { kind: "repairStructure", target: "ownDamaged", amountByLevel: amountCurve(260) },
     passives: {
-      troopHpBonus: { troop: "infantry", mult: 1.2 }, // +20% infantry HP
-      structureDamageTakenMult: 0.9, // own structures take 10% less damage
-      rageEffectBonus: 1.2, // +20% to the rage skill's own heal
+      troopHpBonus: { troop: "infantry", multByLevel: bonusCurve(1.2) },
+      structureDamageTakenMult: { multByLevel: reductionCurve(0.9) },
+      rageEffectBonus: { multByLevel: bonusCurve(1.2) },
     },
+    mastery: { rageEffectMultiplier: 1.15 },
   },
   shadow: {
     name: "الظل — الغارة الخاطفة",
-    rageCost: 6, rageEffect: { kind: "damageStructure", target: "enemyFarm", amount: 200 },
+    rageCost: 6,
+    rageEffect: { kind: "damageStructure", target: "enemyFarm", amountByLevel: amountCurve(200) },
     passives: {
-      marchTimeMult: { troops: ["ninja", "fire"], mult: 0.85 }, // -15% march time
-      infiltratorResistMult: { troops: ["ninja", "fire"], mult: 0.85 }, // -15% return damage taken
-      rageEffectBonus: 1.2, // +20% to the rage skill's own damage
+      marchTimeMult: { troops: ["ninja", "fire"], multByLevel: reductionCurve(0.85) },
+      infiltratorResistMult: { troops: ["ninja", "fire"], multByLevel: reductionCurve(0.85) },
+      rageEffectBonus: { multByLevel: bonusCurve(1.2) },
     },
+    mastery: { rageEffectMultiplier: 1.15 },
   },
 };
 
