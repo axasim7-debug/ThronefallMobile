@@ -12,23 +12,34 @@
 //     troop can path into or attack. The positional engine's targeting is
 //     purely nearest-in-range, not a staged wall/tower/farm/keep order, so
 //     "farm raiding" needs its own deliberate design pass, not a guess.
-//   - bots never retreat or reposition once a troop is sent — same baseline
+//   - bots never retreat or reposition once a group is sent — same baseline
 //     aggression the OLD model's eco/def/atk archetypes always had; this
-//     pass is about economy/combat PACING, not tactical play.
+//     pass is about economy/combat PACING, not skilled live positioning.
 //
 // Reinforcement (defenses start at REINFORCE.startFraction of max effective
 // HP and harden to 100% over REINFORCE.rampSeconds) WAS initially left out
-// as "just" a simplification, but a first test run proved it load-bearing:
-// full-strength towers from tick 0, combined with the new model's real
-// exposure-time damage (a slow unit sits in a tower's 6.0 range far longer
-// than the old model's flat 5s engageTime ever assumed), made ANY early
-// solo attack unwinnable — exactly the pathology reinforcement was already
-// invented to solve once before (see docs/PROGRESS.md). It's ported here
-// faithfully, not re-tuned: same startFraction/rampSeconds the shipped
-// engine uses.
+// as "just" a simplification, but a first test run proved it load-bearing —
+// AND that porting the old engine's exact ramp numbers over-corrects the
+// other way. See docs/PROGRESS.md for the full finding: the old ramp was
+// calibrated for flat, staged combat (dps * fixed engageTime); this model's
+// damage is continuous and geometry-driven, so the numbers don't transfer
+// as-is. Left at the old numbers for now while the grouping change below is
+// evaluated on its own — recalibrating reinforcement is still open.
+//
+// GROUPING (this pass): a troop no longer marches alone the instant it's
+// trained. It waits at its own barracks (in the reserve — not engaged,
+// since nothing enemy is anywhere nearby) until ATTACK_GROUP_SIZE troops
+// have queued up, then all of them are sent together. This directly tests
+// the finding that a solo unit dies to a tower's range advantage before it
+// can ever fight back: does arriving as a group (taking the same tower fire
+// but returning several times the damage at once) change that? Bots still
+// don't retreat, flank, or spread out once released — this is "attack in
+// numbers," not "attack with skill."
 
 const { Battle, DEFAULT_DT } = require("./engine");
 const content = require("./match-content");
+
+const DEFAULT_ATTACK_GROUP_SIZE = 3;
 
 function buildDefense(battle, side, direction) {
   const towerZ = direction * content.LAYOUT.tower * content.PLOT_DEPTH;
@@ -73,6 +84,7 @@ class MatchPlayer {
     this.troopKey = null;
     this.troopsProduced = 0;
     this.barracksT = null;
+    this.reserve = []; // unit ids trained but not yet sent — see GROUPING above
 
     // reinforcement bookkeeping: cumulative REAL combat damage taken, kept
     // separate from the structure's own (ceiling-suppressed) raw hp — see
@@ -90,13 +102,20 @@ class MatchPlayer {
 
   /** Recompute each of this side's structures' effective HP against the
    * rising reinforcement ceiling, after combat for tick `t` has resolved.
+   * `beforeHp` is each structure's hp snapshotted right before this tick's
+   * combat ran — the ONLY correct way to measure "damage dealt this tick",
+   * since a structure's hp already has all PRIOR damage baked into it (a
+   * first version of this re-derived a "previous ceiling" from the formula
+   * instead of a real snapshot, which silently re-counted a structure's
+   * entire damage history as new damage every single tick — caught by a
+   * calibration sweep where the reinforcement curve stopped mattering at
+   * all, which should have been impossible; see docs/PROGRESS.md).
    * Skips anything already destroyed — reinforcement never revives a
    * structure the engine already declared dead, same as the old engine. */
-  applyReinforcement(t) {
+  applyReinforcement(t, beforeHp) {
     for (const s of this.myStructures()) {
       if (s.destroyed) continue;
-      const prevCeiling = reinforcementCeiling(s.maxHp, t - 1);
-      const dealtThisTick = Math.max(0, prevCeiling - s.hp);
+      const dealtThisTick = Math.max(0, beforeHp.get(s.id) - s.hp);
       const dt = this.damageTaken.get(s.id) + dealtThisTick;
       this.damageTaken.set(s.id, dt);
       s.hp = Math.max(0, reinforcementCeiling(s.maxHp, t) - dt);
@@ -174,7 +193,7 @@ function advanceBuild(pl, t) {
   pl.buildBusy = null;
 }
 
-function advanceTroop(pl, enemy, t) {
+function advanceTroop(pl, t) {
   if (!pl.troopBusy) return;
   pl.troopTimer--;
   if (pl.troopTimer > 0) return;
@@ -183,7 +202,6 @@ function advanceTroop(pl, enemy, t) {
   pl.troopBusy = false;
 
   const spawn = barracksAnchor(pl.direction);
-  const target = keepAnchor(enemy.direction);
   const id = pl.battle.addUnit({
     side: pl.side,
     x: spawn.x,
@@ -194,7 +212,17 @@ function advanceTroop(pl, enemy, t) {
     speed: troopDef.speed,
     key: pl.troopKey,
   });
-  pl.battle.moveUnit(id, target.x, target.z); // bots commit — no retreat, see header comment
+  pl.reserve.push(id); // held back — see GROUPING header comment
+}
+
+/** Sends every currently-reserved troop at once toward the enemy keep,
+ * empties the reserve. Bots commit once released — no retreat, see header
+ * comment. */
+function releaseReserve(pl, enemy) {
+  if (pl.reserve.length === 0) return;
+  const target = keepAnchor(enemy.direction);
+  for (const id of pl.reserve) pl.battle.moveUnit(id, target.x, target.z);
+  pl.reserve = [];
 }
 
 /**
@@ -215,16 +243,21 @@ function simulateMatch(stratA, stratB) {
 
   for (let t = 0; t <= duration; t++) {
     if (t > 0) {
+      const beforeHp = new Map();
+      for (const s of [...A.myStructures(), ...B.myStructures()]) beforeHp.set(s.id, s.hp);
+
       for (let i = 0; i < subStepsPerSecond; i++) battle.step();
 
-      A.applyReinforcement(t);
-      B.applyReinforcement(t);
+      A.applyReinforcement(t, beforeHp);
+      B.applyReinforcement(t, beforeHp);
 
       for (const [pl, enemy] of [[A, B], [B, A]]) {
         if (isKeepDestroyed(battle, pl)) continue;
         pl.gold += pl.income;
         advanceBuild(pl, t);
-        advanceTroop(pl, enemy, t);
+        advanceTroop(pl, t);
+        const groupSize = pl.strategy.attackGroupSize || DEFAULT_ATTACK_GROUP_SIZE;
+        if (pl.reserve.length >= groupSize) releaseReserve(pl, enemy);
       }
     }
 
@@ -232,6 +265,14 @@ function simulateMatch(stratA, stratB) {
       if (isKeepDestroyed(battle, pl)) continue;
       if (!pl.buildBusy) pl.strategy.decide(pl, t);
       if (!pl.troopBusy) startTroop(pl, (pl.strategy.pickTroop && pl.strategy.pickTroop(pl)) || "infantry");
+    }
+
+    // end of match: don't leave a half-formed group of trained troops
+    // sitting unused forever — send whatever's left, even if too late to
+    // matter, so final numbers (troopsProduced, structure HP) stay honest.
+    if (t === duration) {
+      releaseReserve(A, B);
+      releaseReserve(B, A);
     }
   }
 
