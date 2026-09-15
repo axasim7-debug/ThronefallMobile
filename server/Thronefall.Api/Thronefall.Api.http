@@ -1,0 +1,6 @@
+@Thronefall.Api_HostAddress = http://localhost:5246
+
+GET {{Thronefall.Api_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

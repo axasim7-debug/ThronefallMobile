@@ -1,0 +1,414 @@
+namespace Thronefall.Engine;
+
+/// <summary>
+/// Faithful C# port of tools/balance-sim/src/engine.js. Keep the two in
+/// sync deliberately: this is the AUTHORITATIVE server-side simulation
+/// (docs/GAME_DESIGN.md §5.3) — the JS copy in tools/balance-sim stays as
+/// the fast iteration/balance-testing tool, this one is what real matches
+/// actually run on. A troop's combat behavior is still data-driven via
+/// Bypasses / DamageProfile / DefenseResistFactor on its TroopConfig —
+/// see content.js's engine.js header comment for the rationale, it holds
+/// here unchanged.
+/// </summary>
+public static class MatchEngine
+{
+    public static double Ceiling(double maxHp, int t)
+    {
+        var r = Content.Defense.Reinforce;
+        var progress = Math.Min(1.0, t / r.RampSeconds);
+        return maxHp * (r.StartFraction + (1 - r.StartFraction) * progress);
+    }
+
+    public static double CurrentHp(Structure s, int t) =>
+        s.Destroyed ? 0 : Math.Max(0, Ceiling(s.MaxHp, t) - s.DamageTaken);
+
+    private static void DamageStructure(Structure s, double dmg, int t)
+    {
+        s.DamageTaken += dmg;
+        if (!s.Destroyed && CurrentHp(s, t) <= 0) s.Destroyed = true;
+    }
+
+    public static PlayerState InitPlayer(string strategyName, IReadOnlyList<(string Key, Dictionary<string, int>? Levels)>? squad = null)
+    {
+        var pl = new PlayerState
+        {
+            Strategy = strategyName,
+            Gold = Content.Economy.StartGold,
+            Income = Content.Economy.BaseIncome,
+            Keep = new Structure(Content.Defense.Keep.Hp),
+        };
+        for (var i = 0; i < Content.Defense.TowerCount; i++) pl.Towers.Add(new Structure(Content.Defense.Tower.Hp));
+
+        foreach (var entry in squad ?? Array.Empty<(string, Dictionary<string, int>?)>())
+        {
+            var order = Content.Commanders[entry.Key].SkillOrder;
+            var levels = new Dictionary<string, int>();
+            foreach (var skill in order) levels[skill] = entry.Levels?.GetValueOrDefault(skill) ?? 3;
+            pl.Commanders.Add(new CommanderInstance { Key = entry.Key, Levels = levels });
+        }
+        return pl;
+    }
+
+    // convenience overload: bare commander keys, default level-3 loadout
+    public static PlayerState InitPlayer(string strategyName, IReadOnlyList<string> squadKeys) =>
+        InitPlayer(strategyName, squadKeys.Select(k => (k, (Dictionary<string, int>?)null)).ToList());
+
+    private static double AtLevel(double[] byLevel, int level) => byLevel[Math.Clamp(level, 1, 5) - 1];
+
+    // ---- economy building ----
+
+    private static object? DamagedStructureNeeding(PlayerState pl, int t)
+    {
+        if (pl.WallMaxHp > 0 && pl.WallHp < pl.WallMaxHp) return "wall";
+        var tower = pl.Towers.FirstOrDefault(s => CurrentHp(s, t) < Ceiling(s.MaxHp, t));
+        return tower;
+    }
+
+    public static bool StartRepair(PlayerState pl, int t)
+    {
+        var need = DamagedStructureNeeding(pl, t);
+        if (need is null) return false;
+        var r = Content.Repair;
+        if (need is "wall")
+        {
+            var missing = pl.WallMaxHp - pl.WallHp;
+            var cost = Math.Ceiling(missing * r.CostPerMissingHp);
+            if (pl.Gold < cost) return false;
+            pl.Gold -= cost;
+            pl.BuildBusy = "repairWall";
+            pl.BuildTimer = Math.Ceiling(missing * r.TimePerMissingHp);
+            return true;
+        }
+        var tower = (Structure)need;
+        var missingHp = Ceiling(tower.MaxHp, t) - CurrentHp(tower, t);
+        var towerCost = Math.Ceiling(missingHp * r.CostPerMissingHp);
+        if (pl.Gold < towerCost) return false;
+        pl.Gold -= towerCost;
+        pl.BuildBusy = "repairTower";
+        pl.BuildTimer = Math.Ceiling(missingHp * r.TimePerMissingHp);
+        pl.RepairTargetTower = tower;
+        return true;
+    }
+
+    public static bool StartTroop(PlayerState pl, string troopKey)
+    {
+        if (pl.TroopBusy || !pl.HasBarracks) return false;
+        var troop = Content.Troops[troopKey];
+        if (pl.Gold < troop.Cost) return false;
+        pl.Gold -= troop.Cost;
+        pl.TroopBusy = true;
+        pl.TroopTimer = troop.BuildTime;
+        pl.TroopKey = troopKey;
+        return true;
+    }
+
+    private static void AdvanceBuild(PlayerState pl, int t)
+    {
+        if (pl.BuildBusy is null) return;
+        pl.BuildTimer--;
+        if (pl.BuildTimer > 0) return;
+        switch (pl.BuildBusy)
+        {
+            case "farm":
+                pl.Farms.Add(new FarmInstance { Hp = Content.Buildings.Farm.Hp });
+                pl.Income += Content.Buildings.Farm.IncomeBonus;
+                break;
+            case "wall":
+                pl.WallHp += Content.Buildings.Wall.HpPerSegment;
+                break;
+            case "barracks":
+                pl.HasBarracks = true;
+                pl.BarracksT = t;
+                break;
+            case "repairWall":
+                pl.WallHp = pl.WallMaxHp;
+                pl.Stats.RepairsDone++;
+                break;
+            case "repairTower":
+                pl.RepairTargetTower!.DamageTaken = 0;
+                pl.RepairTargetTower!.Destroyed = false;
+                pl.RepairTargetTower = null;
+                pl.Stats.RepairsDone++;
+                break;
+        }
+        pl.BuildBusy = null;
+    }
+
+    private static void AdvanceTroop(PlayerState pl, int t, Action<MarchingTroop> onSpawn)
+    {
+        if (!pl.TroopBusy) return;
+        pl.TroopTimer--;
+        if (pl.TroopTimer > 0) return;
+        var troopDef = Content.Troops[pl.TroopKey!];
+        pl.TroopsProduced++;
+        pl.ArmyValue += troopDef.Cost;
+        pl.TroopBusy = false;
+        pl.FirstTroopT ??= t;
+
+        double dps = troopDef.DpsFactor * troopDef.Cost;
+        double hp = troopDef.HpFactor * troopDef.Cost;
+        double marchTime = troopDef.MarchTime;
+        double resistFactor = troopDef.DefenseResistFactor ?? 1;
+
+        foreach (var cmd in pl.Commanders)
+        {
+            var p = Content.Commanders[cmd.Key].Passives;
+            if (p.TroopDpsBonus is { } b1 && b1.Troop == pl.TroopKey) dps *= AtLevel(b1.MultByLevel, cmd.Levels["troopDpsBonus"]);
+            if (p.TroopDpsBonus2 is { } b2 && b2.Troop == pl.TroopKey) dps *= AtLevel(b2.MultByLevel, cmd.Levels["troopDpsBonus2"]);
+            if (p.TroopHpBonus is { } b3 && b3.Troop == pl.TroopKey) hp *= AtLevel(b3.MultByLevel, cmd.Levels["troopHpBonus"]);
+            if (p.MarchTimeMult is { } b4 && b4.Troops.Contains(pl.TroopKey)) marchTime *= AtLevel(b4.MultByLevel, cmd.Levels["marchTimeMult"]);
+            if (p.InfiltratorResistMult is { } b5 && b5.Troops.Contains(pl.TroopKey)) resistFactor *= AtLevel(b5.MultByLevel, cmd.Levels["infiltratorResistMult"]);
+        }
+
+        // rounded to a whole tick (MidpointRounding.AwayFromZero to match
+        // JS's Math.round semantics exactly) — a passive (shadow's
+        // marchTimeMult) can make this fractional, and the tick loop only
+        // ever looks up integer ticks; an un-rounded arrival would silently
+        // never resolve. Found and fixed in the JS port first — see
+        // tools/balance-sim/src/engine.js's matching comment.
+        var arriveAt = t + (int)Math.Round(marchTime, MidpointRounding.AwayFromZero);
+        onSpawn(new MarchingTroop(arriveAt, hp, dps, troopDef.Bypasses, troopDef.DamageProfile, resistFactor));
+    }
+
+    // ---- combat ----
+
+    private static double DmgMult(MarchingTroop troop, string targetType) =>
+        troop.DamageProfile is not null && troop.DamageProfile.TryGetValue(targetType, out var m) ? m : 1;
+
+    private static double ResistMult(MarchingTroop troop) => troop.DefenseResistFactor;
+
+    private static double GuardianDamageMult(PlayerState pl)
+    {
+        var cmd = pl.Commanders.FirstOrDefault(c => c.Key == "guardian");
+        if (cmd is null) return 1;
+        var p = Content.Commanders["guardian"].Passives.StructureDamageTakenMultByLevel;
+        return p is null ? 1 : AtLevel(p, cmd.Levels["structureDamageTakenMult"]);
+    }
+
+    private static Structure? WeakestAliveTower(PlayerState pl, int t)
+    {
+        var alive = pl.Towers.Where(s => !s.Destroyed).ToList();
+        return alive.Count == 0 ? null : alive.Aggregate((a, b) => CurrentHp(a, t) <= CurrentHp(b, t) ? a : b);
+    }
+
+    private static FarmInstance? WeakestAliveFarm(PlayerState pl) => pl.Farms.FirstOrDefault(f => f.Hp > 0);
+
+    private static void ResolveAttack(PlayerState defender, MarchingTroop troop, int t)
+    {
+        if (defender.KeepDestroyedAtT is not null) return;
+        double hp = troop.Hp;
+        var wall = Content.Buildings.Wall;
+        var tower = Content.Defense.Tower;
+        var crossFireFactor = Content.Defense.CrossFireFactor;
+        var keep = Content.Defense.Keep;
+        var bypasses = troop.Bypasses ?? Array.Empty<string>();
+        var gMult = GuardianDamageMult(defender);
+
+        if (!bypasses.Contains("wall") && defender.WallHp > 0)
+        {
+            var dmgToTroop = wall.Dps * ResistMult(troop) * wall.EngageTime;
+            var dmgToWall = troop.Dps * DmgMult(troop, "wall") * wall.EngageTime * gMult;
+            defender.WallHp = Math.Max(0, defender.WallHp - dmgToWall);
+            hp -= dmgToTroop;
+            if (hp <= 0) { defender.Stats.DiedAtWall++; return; }
+        }
+
+        if (!bypasses.Contains("tower"))
+        {
+            var primary = WeakestAliveTower(defender, t);
+            if (primary is not null)
+            {
+                var dmgToTroop = tower.Dps * ResistMult(troop) * tower.EngageTime;
+                var dmgToTower = troop.Dps * DmgMult(troop, "tower") * tower.EngageTime * gMult;
+                DamageStructure(primary, dmgToTower, t);
+                if (primary.Destroyed) defender.Stats.TowersLost++;
+                hp -= dmgToTroop;
+                if (hp <= 0 || !primary.Destroyed) { defender.Stats.StoppedAtTower++; return; }
+            }
+
+            var survivors = defender.Towers.Any(s => !s.Destroyed);
+            if (survivors)
+            {
+                hp -= tower.Dps * ResistMult(troop) * crossFireFactor * tower.EngageTime;
+                if (hp <= 0) { defender.Stats.StoppedAtTower++; return; }
+            }
+        }
+
+        if (hp <= 0) return;
+
+        var farm = Content.Buildings.Farm;
+        var targetFarm = WeakestAliveFarm(defender);
+        if (targetFarm is not null)
+        {
+            defender.Stats.FarmsRaided++;
+            targetFarm.Hp = Math.Max(0, targetFarm.Hp - troop.Dps * DmgMult(troop, "farm") * farm.AssaultEngageTime);
+            if (targetFarm.Hp == 0 && !targetFarm.IncomeRemoved)
+            {
+                defender.Income -= farm.IncomeBonus;
+                if (farm.DisruptionPenalty > 0 && farm.DisruptionSeconds > 0)
+                    defender.Disruptions.Add(new Disruption { Amount = farm.DisruptionPenalty, Until = t + (int)farm.DisruptionSeconds });
+                targetFarm.IncomeRemoved = true;
+            }
+            return;
+        }
+
+        defender.Stats.ReachedKeep++;
+        var dmgToKeep = troop.Dps * DmgMult(troop, "keep") * keep.EngageTime * gMult;
+        DamageStructure(defender.Keep, dmgToKeep, t);
+        if (defender.Keep.Destroyed) defender.KeepDestroyedAtT ??= t;
+    }
+
+    // ---- commanders / rage ----
+
+    private sealed record PendingCast(PlayerState Self, PlayerState Opponent, string Kind, string Target, double Amount);
+
+    private static List<PendingCast> DecideCommanderCasts(PlayerState self, PlayerState opponent, int t)
+    {
+        var pending = new List<PendingCast>();
+        foreach (var cmd in self.Commanders)
+        {
+            cmd.Rage = Math.Min(Content.Rage.Max, cmd.Rage + Content.Rage.FillRatePerSec);
+            var def = Content.Commanders[cmd.Key];
+            if (cmd.Rage < def.RageCost) continue;
+            var targetsEnemy = def.RageEffect.Target is "enemyFarm" or "enemyTower";
+            if (targetsEnemy && opponent.KeepDestroyedAtT is not null) continue;
+            cmd.Rage -= def.RageCost;
+            cmd.Casts++;
+
+            var amount = AtLevel(def.RageEffect.AmountByLevel, cmd.Levels["rage"]);
+            if (def.Passives.RageEffectBonusByLevel is { } bonus)
+                amount *= AtLevel(bonus, cmd.Levels["rageEffectBonus"]);
+            if (cmd.IsMastered()) amount *= def.Mastery.RageEffectMultiplier;
+
+            pending.Add(new PendingCast(self, opponent, def.RageEffect.Kind, def.RageEffect.Target, amount));
+        }
+        return pending;
+    }
+
+    private static void ApplyCommanderCast(PendingCast cast, int t)
+    {
+        if (cast.Kind == "damageStructure")
+        {
+            var targetPlayer = cast.Target is "enemyFarm" or "enemyTower" ? cast.Opponent : cast.Self;
+            if (cast.Target == "enemyTower")
+            {
+                var tower = WeakestAliveTower(targetPlayer, t);
+                if (tower is not null) DamageStructure(tower, cast.Amount, t);
+                if (targetPlayer.Keep.Destroyed) targetPlayer.KeepDestroyedAtT ??= t;
+            }
+            else if (cast.Target == "enemyFarm")
+            {
+                var farm = WeakestAliveFarm(targetPlayer);
+                if (farm is not null)
+                {
+                    farm.Hp = Math.Max(0, farm.Hp - cast.Amount);
+                    if (farm.Hp == 0 && !farm.IncomeRemoved)
+                    {
+                        var fc = Content.Buildings.Farm;
+                        targetPlayer.Income -= fc.IncomeBonus;
+                        if (fc.DisruptionPenalty > 0 && fc.DisruptionSeconds > 0)
+                            targetPlayer.Disruptions.Add(new Disruption { Amount = fc.DisruptionPenalty, Until = t + (int)fc.DisruptionSeconds });
+                        farm.IncomeRemoved = true;
+                    }
+                }
+            }
+        }
+        else if (cast.Kind == "repairStructure")
+        {
+            var self = cast.Self;
+            var wallDamaged = self.WallMaxHp > 0 && self.WallHp < self.WallMaxHp;
+            if (wallDamaged)
+            {
+                self.WallHp = Math.Min(self.WallMaxHp, self.WallHp + cast.Amount);
+            }
+            else
+            {
+                var tower = self.Towers.Where(s => s.DamageTaken > 0).OrderByDescending(s => s.DamageTaken).FirstOrDefault();
+                if (tower is not null)
+                {
+                    tower.DamageTaken = Math.Max(0, tower.DamageTaken - cast.Amount);
+                    if (tower.Destroyed && CurrentHp(tower, t) > 0) tower.Destroyed = false;
+                }
+            }
+        }
+    }
+
+    // ---- win resolution ----
+
+    public sealed record MatchResult(string Winner, string Tiebreak); // Winner: "A" | "B" | "draw"
+
+    public static MatchResult DetermineWinner(PlayerState a, PlayerState b)
+    {
+        var duration = Content.Economy.DurationSeconds;
+        if (a.KeepDestroyedAtT is not null && b.KeepDestroyedAtT is null) return new("B", "keep-kill");
+        if (b.KeepDestroyedAtT is not null && a.KeepDestroyedAtT is null) return new("A", "keep-kill");
+        if (a.KeepDestroyedAtT is not null && b.KeepDestroyedAtT is not null)
+        {
+            if (a.KeepDestroyedAtT == b.KeepDestroyedAtT) return new("draw", "mutual-destruction-same-tick");
+            return new(a.KeepDestroyedAtT > b.KeepDestroyedAtT ? "A" : "B", "mutual-destruction-timing");
+        }
+        if (a.Stats.TowersLost != b.Stats.TowersLost)
+            return new(b.Stats.TowersLost > a.Stats.TowersLost ? "A" : "B", "towers-destroyed");
+        // Note: aTowersTaken = b.Stats.TowersLost (towers OF b that A destroyed)
+        var aKeepPct = CurrentHp(a.Keep, duration) / Content.Defense.Keep.Hp;
+        var bKeepPct = CurrentHp(b.Keep, duration) / Content.Defense.Keep.Hp;
+        if (aKeepPct != bKeepPct) return new(aKeepPct > bKeepPct ? "A" : "B", "own-keep-hp-pct");
+        return new("draw", "true-draw");
+    }
+
+    // ---- top-level simulation ----
+
+    public static (PlayerState A, PlayerState B, MatchResult Result) Simulate(IStrategy stratA, IStrategy stratB)
+    {
+        var a = InitPlayer(stratA.Name, stratA.Squad);
+        var b = InitPlayer(stratB.Name, stratB.Squad);
+        var arrivalsToA = new Dictionary<int, List<MarchingTroop>>();
+        var arrivalsToB = new Dictionary<int, List<MarchingTroop>>();
+        var duration = Content.Economy.DurationSeconds;
+
+        void Queue(Dictionary<int, List<MarchingTroop>> map, MarchingTroop arrival)
+        {
+            if (!map.TryGetValue(arrival.ArriveAt, out var list)) map[arrival.ArriveAt] = list = new List<MarchingTroop>();
+            list.Add(arrival);
+        }
+
+        for (var t = 0; t <= duration; t++)
+        {
+            if (arrivalsToA.TryGetValue(t, out var arrA)) foreach (var tr in arrA) ResolveAttack(a, tr, t);
+            if (arrivalsToB.TryGetValue(t, out var arrB)) foreach (var tr in arrB) ResolveAttack(b, tr, t);
+
+            if (t > 0)
+            {
+                foreach (var pl in new[] { a, b })
+                {
+                    if (pl.KeepDestroyedAtT is not null) continue;
+                    pl.Disruptions = pl.Disruptions.Where(d => d.Until > t).ToList();
+                    var penalty = pl.Disruptions.Sum(d => d.Amount);
+                    pl.Gold += Math.Max(1, pl.Income - penalty);
+                }
+
+                if (a.KeepDestroyedAtT is null) { AdvanceBuild(a, t); AdvanceTroop(a, t, arr => Queue(arrivalsToB, arr)); }
+                if (b.KeepDestroyedAtT is null) { AdvanceBuild(b, t); AdvanceTroop(b, t, arr => Queue(arrivalsToA, arr)); }
+
+                var pending = new List<PendingCast>();
+                if (a.KeepDestroyedAtT is null) pending.AddRange(DecideCommanderCasts(a, b, t));
+                if (b.KeepDestroyedAtT is null) pending.AddRange(DecideCommanderCasts(b, a, t));
+                foreach (var cast in pending.Where(c => c.Kind == "damageStructure")) ApplyCommanderCast(cast, t);
+                foreach (var cast in pending.Where(c => c.Kind != "damageStructure")) ApplyCommanderCast(cast, t);
+            }
+
+            if (a.KeepDestroyedAtT is null)
+            {
+                if (a.BuildBusy is null) stratA.Decide(a, t);
+                if (!a.TroopBusy) StartTroop(a, stratA.PickTroop(a));
+            }
+            if (b.KeepDestroyedAtT is null)
+            {
+                if (b.BuildBusy is null) stratB.Decide(b, t);
+                if (!b.TroopBusy) StartTroop(b, stratB.PickTroop(b));
+            }
+        }
+
+        return (a, b, DetermineWinner(a, b));
+    }
+}
