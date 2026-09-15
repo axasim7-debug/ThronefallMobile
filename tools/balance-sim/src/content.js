@@ -104,22 +104,49 @@ const TROOPS = {
 const RAGE = { max: 10, fillRatePerSec: 10 / 90 }; // full bar from empty in 90s
 
 // Commander cards. Each has exactly ONE manually-triggered ability (the
-// rage skill) — the only skill players actively manage — plus 3 passive
-// skills that are not yet modeled numerically (first pass: prove the rage
-// economy itself doesn't break balance before layering passives on top;
-// see docs/PROGRESS.md). A launch squad fields all 3.
+// rage skill — the only skill players actively manage) plus 3 passives,
+// always-on stat buffs from the same combat axis as the rage skill. A
+// launch squad fields all 3 commanders.
+//
+// Numbers here are a single representative tier (~mid skill-level), NOT
+// yet the full 1-5 upgrade curve + mastery bonus from docs/GAME_DESIGN.md
+// §3.3 — deliberately deferred until this base shape is proven not to
+// break balance (same "prove the mechanism before the granular curve"
+// order used for the rage economy itself).
+//
+// HARD RULE: no passive may touch RAGE.fillRatePerSec or a rageCost. That
+// would let card-leveling speed (which payment CAN accelerate, same as
+// any other card) indirectly buy more skill casts — exactly the loophole
+// the fixed-rate rule exists to close. Passives may only affect combat
+// stats (troop dps/hp/marchTime, structure damage taken) or a rage
+// skill's EFFECT MAGNITUDE once cast, never how often it can be cast.
 const COMMANDERS = {
   warlord: {
     name: "القائد المدمّر — الهجمة الكاسحة",
     rageCost: 6, rageEffect: { kind: "damageStructure", target: "enemyTower", amount: 320 },
+    passives: {
+      troopDpsBonus: { troop: "cavalry", mult: 1.15 }, // +15% cavalry damage
+      troopDpsBonus2: { troop: "engineer", mult: 1.15 }, // +15% engineer damage
+      rageEffectBonus: 1.2, // +20% to the rage skill's own damage
+    },
   },
   guardian: {
     name: "الحارسة — الدرع الحصين",
     rageCost: 6, rageEffect: { kind: "repairStructure", target: "ownDamaged", amount: 260 },
+    passives: {
+      troopHpBonus: { troop: "infantry", mult: 1.2 }, // +20% infantry HP
+      structureDamageTakenMult: 0.9, // own structures take 10% less damage
+      rageEffectBonus: 1.2, // +20% to the rage skill's own heal
+    },
   },
   shadow: {
     name: "الظل — الغارة الخاطفة",
     rageCost: 6, rageEffect: { kind: "damageStructure", target: "enemyFarm", amount: 200 },
+    passives: {
+      marchTimeMult: { troops: ["ninja", "fire"], mult: 0.85 }, // -15% march time
+      infiltratorResistMult: { troops: ["ninja", "fire"], mult: 0.85 }, // -15% return damage taken
+      rageEffectBonus: 1.2, // +20% to the rage skill's own damage
+    },
   },
 };
 

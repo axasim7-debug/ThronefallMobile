@@ -112,16 +112,24 @@ function resistMult(troop) {
   return troop.defenseResistFactor ?? 1;
 }
 
+// "الحارسة" passive: own wall/tower/keep take reduced damage (farms are
+// not covered — her theme is core defenses, not economy buildings)
+function guardianDamageMult(pl, content) {
+  if (!pl.commanders.some((c) => c.key === "guardian")) return 1;
+  return content.COMMANDERS.guardian.passives.structureDamageTakenMult ?? 1;
+}
+
 function resolveAttack(defender, troop, content, t) {
   if (defender.keepDestroyedAtT !== null) return;
   let hp = troop.hp;
   const { wall } = content.BUILDINGS;
   const { tower, crossFireFactor, keep } = content.DEFENSE;
   const bypasses = troop.bypasses || [];
+  const gMult = guardianDamageMult(defender, content);
 
   if (!bypasses.includes("wall") && defender.wallHP > 0) {
     const dmgToTroop = wall.dps * resistMult(troop) * wall.engageTime;
-    const dmgToWall = troop.dps * dmgMult(troop, "wall") * wall.engageTime;
+    const dmgToWall = troop.dps * dmgMult(troop, "wall") * wall.engageTime * gMult;
     defender.wallHP = Math.max(0, defender.wallHP - dmgToWall);
     hp -= dmgToTroop;
     if (hp <= 0) { defender.stats.diedAtWall++; return; }
@@ -132,7 +140,7 @@ function resolveAttack(defender, troop, content, t) {
     if (alive.length > 0) {
       const primary = alive.reduce((a, b) => (currentHP(a, t, content) <= currentHP(b, t, content) ? a : b));
       const dmgToTroop = tower.dps * resistMult(troop) * tower.engageTime;
-      const dmgToTower = troop.dps * dmgMult(troop, "tower") * tower.engageTime;
+      const dmgToTower = troop.dps * dmgMult(troop, "tower") * tower.engageTime * gMult;
       damageStructure(primary, dmgToTower, t, content);
       if (primary.destroyed) defender.stats.towersLost++;
       hp -= dmgToTroop;
@@ -170,7 +178,7 @@ function resolveAttack(defender, troop, content, t) {
   }
 
   defender.stats.reachedKeep++;
-  const dmgToKeep = troop.dps * dmgMult(troop, "keep") * keep.engageTime;
+  const dmgToKeep = troop.dps * dmgMult(troop, "keep") * keep.engageTime * gMult;
   damageStructure(defender.keep, dmgToKeep, t, content);
   if (defender.keep.destroyed && defender.keepDestroyedAtT === null) defender.keepDestroyedAtT = t;
 }
@@ -215,13 +223,29 @@ function advanceTroop(pl, content, t, onSpawn) {
   pl.armyValue += troopDef.cost;
   pl.troopBusy = false;
   if (pl.firstTroopT === null) pl.firstTroopT = t;
+
+  // commander passives that modify THIS troop as it's produced (dps/hp
+  // buffs, march-time and return-damage-resist buffs for named troops)
+  let dps = troopDef.dpsFactor * troopDef.cost;
+  let hp = troopDef.hpFactor * troopDef.cost;
+  let marchTime = troopDef.marchTime;
+  let resistFactor = troopDef.defenseResistFactor ?? 1;
+  for (const cmd of pl.commanders) {
+    const p = content.COMMANDERS[cmd.key].passives;
+    if (!p) continue;
+    if (p.troopDpsBonus && p.troopDpsBonus.troop === pl.troopKey) dps *= p.troopDpsBonus.mult;
+    if (p.troopDpsBonus2 && p.troopDpsBonus2.troop === pl.troopKey) dps *= p.troopDpsBonus2.mult;
+    if (p.troopHpBonus && p.troopHpBonus.troop === pl.troopKey) hp *= p.troopHpBonus.mult;
+    if (p.marchTimeMult && p.marchTimeMult.troops.includes(pl.troopKey)) marchTime *= p.marchTimeMult.mult;
+    if (p.infiltratorResistMult && p.infiltratorResistMult.troops.includes(pl.troopKey)) resistFactor *= p.infiltratorResistMult.mult;
+  }
+
   onSpawn({
-    arriveAt: t + troopDef.marchTime,
-    hp: troopDef.hpFactor * troopDef.cost,
-    dps: troopDef.dpsFactor * troopDef.cost,
+    arriveAt: t + marchTime,
+    hp, dps,
     bypasses: troopDef.bypasses,
     damageProfile: troopDef.damageProfile,
-    defenseResistFactor: troopDef.defenseResistFactor,
+    defenseResistFactor: resistFactor,
   });
 }
 
@@ -257,7 +281,12 @@ function decideCommanderCasts(self, opponent, content, t) {
     if (targetsEnemy && opponent.keepDestroyedAtT !== null) continue; // nothing left to hit — don't spend rage on a no-op
     cmd.rage -= def.rageCost;
     cmd.casts++;
-    pending.push({ self, opponent, eff: def.rageEffect });
+    // the caster's own "rageEffectBonus" passive scales the effect
+    // magnitude only — never how often it can fire (see passives block
+    // comment in content.js: that line must never move)
+    const bonus = def.passives?.rageEffectBonus ?? 1;
+    const eff = { ...def.rageEffect, amount: def.rageEffect.amount * bonus };
+    pending.push({ self, opponent, eff });
   }
   return pending;
 }
