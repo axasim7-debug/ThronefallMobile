@@ -9,7 +9,7 @@ namespace Thronefall.Engine;
 /// </summary>
 public enum CommandKind
 {
-    Build,     // Arg: "farm" | "wall" | "barracks"
+    Build,     // Arg: "farm" | "barracks"
     Train,     // Arg: a key from Content.Troops
     Repair,    // Arg: ignored (the engine picks the damaged structure)
     CastRage,  // Arg: a commander key in the player's own squad
@@ -173,16 +173,12 @@ public sealed class PlayerController : IMatchController
 
     private static string WhyBuildFailed(PlayerState pl, string building)
     {
-        if (building is not ("farm" or "wall" or "barracks")) return "unknown-building";
+        if (building is not ("farm" or "barracks")) return "unknown-building";
         if (pl.BuildBusy is not null) return "build-slot-busy";
         switch (building)
         {
             case "farm":
                 if (pl.Farms.Count >= Content.Buildings.Farm.MaxCount) return "farm-limit-reached";
-                return "not-enough-gold";
-            case "wall":
-                var wall = Content.Buildings.Wall;
-                if (pl.WallMaxHp >= wall.MaxSegments * wall.HpPerSegment) return "wall-already-complete";
                 return "not-enough-gold";
             default:
                 if (pl.HasBarracks) return "barracks-already-built";

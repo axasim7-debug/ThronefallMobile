@@ -57,12 +57,8 @@ public static class MatchEngine
 
     // ---- economy building ----
 
-    private static object? DamagedStructureNeeding(PlayerState pl, int t)
-    {
-        if (pl.WallMaxHp > 0 && pl.WallHp < pl.WallMaxHp) return "wall";
-        var tower = pl.Towers.FirstOrDefault(s => CurrentHp(s, t) < Ceiling(s.MaxHp, t));
-        return tower;
-    }
+    private static Structure? DamagedStructureNeeding(PlayerState pl, int t) =>
+        pl.Towers.FirstOrDefault(s => CurrentHp(s, t) < Ceiling(s.MaxHp, t));
 
     public static bool StartRepair(PlayerState pl, int t)
     {
@@ -71,20 +67,9 @@ public static class MatchEngine
         // no existing number — but without it a networked player could
         // overwrite (and silently cancel) a build they had already paid for.
         if (pl.BuildBusy is not null) return false;
-        var need = DamagedStructureNeeding(pl, t);
-        if (need is null) return false;
+        var tower = DamagedStructureNeeding(pl, t);
+        if (tower is null) return false;
         var r = Content.Repair;
-        if (need is "wall")
-        {
-            var missing = pl.WallMaxHp - pl.WallHp;
-            var cost = Math.Ceiling(missing * r.CostPerMissingHp);
-            if (pl.Gold < cost) return false;
-            pl.Gold -= cost;
-            pl.BuildBusy = "repairWall";
-            pl.BuildTimer = Math.Ceiling(missing * r.TimePerMissingHp);
-            return true;
-        }
-        var tower = (Structure)need;
         var missingHp = Ceiling(tower.MaxHp, t) - CurrentHp(tower, t);
         var towerCost = Math.Ceiling(missingHp * r.CostPerMissingHp);
         if (pl.Gold < towerCost) return false;
@@ -114,18 +99,6 @@ public static class MatchEngine
                 pl.Gold -= farm.Cost;
                 pl.BuildBusy = "farm";
                 pl.BuildTimer = farm.BuildTime;
-                return true;
-            }
-            case "wall":
-            {
-                var wall = Content.Buildings.Wall;
-                if (pl.WallMaxHp >= wall.MaxSegments * wall.HpPerSegment || pl.Gold < wall.Cost) return false;
-                // MaxHp rises at order time, the HP itself lands on completion
-                // (AdvanceBuild) — preserved from the original strategy code.
-                pl.WallMaxHp += wall.HpPerSegment;
-                pl.Gold -= wall.Cost;
-                pl.BuildBusy = "wall";
-                pl.BuildTimer = wall.BuildTime;
                 return true;
             }
             case "barracks":
@@ -165,16 +138,9 @@ public static class MatchEngine
                 pl.Farms.Add(new FarmInstance { Hp = Content.Buildings.Farm.Hp });
                 pl.Income += Content.Buildings.Farm.IncomeBonus;
                 break;
-            case "wall":
-                pl.WallHp += Content.Buildings.Wall.HpPerSegment;
-                break;
             case "barracks":
                 pl.HasBarracks = true;
                 pl.BarracksT = t;
-                break;
-            case "repairWall":
-                pl.WallHp = pl.WallMaxHp;
-                pl.Stats.RepairsDone++;
                 break;
             case "repairTower":
                 pl.RepairTargetTower!.DamageTaken = 0;
@@ -249,21 +215,11 @@ public static class MatchEngine
     {
         if (defender.KeepDestroyedAtT is not null) return;
         double hp = troop.Hp;
-        var wall = Content.Buildings.Wall;
         var tower = Content.Defense.Tower;
         var crossFireFactor = Content.Defense.CrossFireFactor;
         var keep = Content.Defense.Keep;
         var bypasses = troop.Bypasses ?? Array.Empty<string>();
         var gMult = GuardianDamageMult(defender);
-
-        if (!bypasses.Contains("wall") && defender.WallHp > 0)
-        {
-            var dmgToTroop = wall.Dps * ResistMult(troop) * wall.EngageTime;
-            var dmgToWall = troop.Dps * DmgMult(troop, "wall") * wall.EngageTime * gMult;
-            defender.WallHp = Math.Max(0, defender.WallHp - dmgToWall);
-            hp -= dmgToTroop;
-            if (hp <= 0) { defender.Stats.DiedAtWall++; return; }
-        }
 
         if (!bypasses.Contains("tower"))
         {
@@ -379,19 +335,11 @@ public static class MatchEngine
         else if (cast.Kind == "repairStructure")
         {
             var self = cast.Self;
-            var wallDamaged = self.WallMaxHp > 0 && self.WallHp < self.WallMaxHp;
-            if (wallDamaged)
+            var tower = self.Towers.Where(s => s.DamageTaken > 0).OrderByDescending(s => s.DamageTaken).FirstOrDefault();
+            if (tower is not null)
             {
-                self.WallHp = Math.Min(self.WallMaxHp, self.WallHp + cast.Amount);
-            }
-            else
-            {
-                var tower = self.Towers.Where(s => s.DamageTaken > 0).OrderByDescending(s => s.DamageTaken).FirstOrDefault();
-                if (tower is not null)
-                {
-                    tower.DamageTaken = Math.Max(0, tower.DamageTaken - cast.Amount);
-                    if (tower.Destroyed && CurrentHp(tower, t) > 0) tower.Destroyed = false;
-                }
+                tower.DamageTaken = Math.Max(0, tower.DamageTaken - cast.Amount);
+                if (tower.Destroyed && CurrentHp(tower, t) > 0) tower.Destroyed = false;
             }
         }
     }

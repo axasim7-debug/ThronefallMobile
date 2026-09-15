@@ -57,16 +57,6 @@ standing on it, front-facing clean silhouette.
 [+ راسخة الطابع من قسم 0]
 ```
 
-### السور (Wall segment)
-```
-A short thick stone wall segment, crenellated top edge (small square
-notches along the top), same tan stone material as the castle keep,
-weathered but solid, straight rectangular block, no gate, no characters,
-front-facing clean silhouette.
-
-[+ راسخة الطابع من قسم 0]
-```
-
 ### المزرعة (Farm)
 ```
 A small round wooden watermill-style farm building, brown wood planks,

@@ -46,7 +46,6 @@ const hud = new Hud(send);
 const connection = new MatchConnection(url, {
   onStarted(message) {
     hud.applyCatalog(message.catalog);
-    city.applyCatalog(message.catalog);
     hud.setStatus(`Match started — opponent: ${message.opponent}`);
   },
 

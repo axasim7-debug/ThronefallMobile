@@ -87,7 +87,7 @@ public class PlayerCommandTests
         Assert.True(session.A.TroopsProduced > 0, "player commands should produce troops");
         // and those troops must actually land on the opponent — not merely exist.
         // (This is the failure mode the fractional-march-time bug produced.)
-        var enemyWasHit = session.B.Stats.DiedAtWall + session.B.Stats.StoppedAtTower
+        var enemyWasHit = session.B.Stats.StoppedAtTower
                           + session.B.Stats.ReachedKeep + session.B.Stats.FarmsRaided;
         Assert.True(enemyWasHit > 0, "produced troops must actually arrive and engage");
     }
@@ -220,9 +220,8 @@ public class PlayerCommandTests
         var (session, player) = NewMatch();
         session.Step();
         session.A.Gold = 10_000;
-        // a damaged wall exists, so repair has a legitimate target
-        session.A.WallMaxHp = Content.Buildings.Wall.HpPerSegment;
-        session.A.WallHp = 10;
+        // a damaged tower exists, so repair has a legitimate target
+        session.A.Towers[0].DamageTaken = 50;
 
         player.Submit(new PlayerCommand(CommandKind.Build, "barracks"));
         session.Step();

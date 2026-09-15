@@ -103,7 +103,7 @@ public class MatchEngineTests
         {
             var (a, b, _) = MatchEngine.Simulate(attacker, Strategies.All[defenderName]);
             Assert.True(a.TroopsProduced > 0, $"{troopKey}: attacker never produced a troop");
-            var activity = b.Stats.DiedAtWall + b.Stats.StoppedAtTower + b.Stats.ReachedKeep + b.Stats.FarmsRaided;
+            var activity = b.Stats.StoppedAtTower + b.Stats.ReachedKeep + b.Stats.FarmsRaided;
             Assert.True(activity > 0, $"{troopKey} vs {defenderName}: troops produced but none ever attacked");
         }
     }
@@ -139,24 +139,31 @@ public class MatchEngineTests
     [Fact]
     public void CrossValidate_EcoVsDef()
     {
+        // "def"'s numbers were recaptured after the wall was removed (see
+        // docs/PROGRESS.md) — its build order changed, so these are NOT the
+        // pre-removal numbers, deliberately. Captured from an actual run,
+        // cross-checked against tools/balance-sim's own JS output for the
+        // same matchup (identical), not invented.
         var (a, b, result) = Run("eco", "def");
         Assert.Equal("A", result.Winner); // eco wins
+        Assert.Equal("towers-destroyed", result.Tiebreak);
         Assert.Equal(43, a.TroopsProduced);
-        Assert.Equal(30, b.TroopsProduced);
-        Assert.Equal(534, Math.Round(MatchEngine.CurrentHp(a.Keep, 360)));
+        Assert.Equal(42, b.TroopsProduced);
+        Assert.Equal(68, Math.Round(MatchEngine.CurrentHp(a.Keep, 360)));
         Assert.Equal(134, Math.Round(MatchEngine.CurrentHp(b.Keep, 360)));
     }
 
     [Fact]
     public void CrossValidate_DefVsAtk()
     {
+        // Recaptured post-wall-removal — see CrossValidate_EcoVsDef's comment.
         var (a, b, result) = Run("def", "atk");
         Assert.Equal("B", result.Winner); // atk wins
-        Assert.Equal("towers-destroyed", result.Tiebreak);
-        Assert.Equal(24, a.TroopsProduced);
+        Assert.Equal("own-keep-hp-pct", result.Tiebreak);
+        Assert.Equal(40, a.TroopsProduced);
         Assert.Equal(45, b.TroopsProduced);
-        Assert.Equal(35, Math.Round(MatchEngine.CurrentHp(a.Keep, 360)));
-        Assert.Equal(700, Math.Round(MatchEngine.CurrentHp(b.Keep, 360)));
+        Assert.Equal(101, Math.Round(MatchEngine.CurrentHp(a.Keep, 360)));
+        Assert.Equal(168, Math.Round(MatchEngine.CurrentHp(b.Keep, 360)));
     }
 
     [Fact]
@@ -167,10 +174,11 @@ public class MatchEngineTests
         Assert.Equal(43, ea.TroopsProduced);
         Assert.Equal(168, Math.Round(MatchEngine.CurrentHp(ea.Keep, 360)));
 
+        // Recaptured post-wall-removal — see CrossValidate_EcoVsDef's comment.
         var (da, db, dr) = Run("def", "def");
         Assert.Equal("draw", dr.Winner);
-        Assert.Equal(31, da.TroopsProduced);
-        Assert.Equal(368, Math.Round(MatchEngine.CurrentHp(da.Keep, 360)));
+        Assert.Equal(41, da.TroopsProduced);
+        Assert.Equal(301, Math.Round(MatchEngine.CurrentHp(da.Keep, 360)));
 
         var (aa, ab, ar) = Run("atk", "atk");
         Assert.Equal("draw", ar.Winner);

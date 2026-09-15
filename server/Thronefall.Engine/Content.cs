@@ -13,9 +13,7 @@ public sealed record FarmConfig(
 
 public sealed record BarracksConfig(double Cost, double BuildTime);
 
-public sealed record WallConfig(double Cost, double BuildTime, double HpPerSegment, int MaxSegments, double Dps, double EngageTime);
-
-public sealed record BuildingsConfig(FarmConfig Farm, BarracksConfig Barracks, WallConfig Wall);
+public sealed record BuildingsConfig(FarmConfig Farm, BarracksConfig Barracks);
 
 public sealed record TowerConfig(double Hp, double Dps, double EngageTime);
 public sealed record KeepConfig(double Hp, double Dps, double EngageTime);
@@ -80,8 +78,7 @@ public static class Content
         Farm: new FarmConfig(
             Cost: 150, BuildTime: 8, IncomeBonus: 5, Hp: 60, MaxCount: 2,
             AssaultEngageTime: 2, DisruptionPenalty: 6, DisruptionSeconds: 40),
-        Barracks: new BarracksConfig(Cost: 200, BuildTime: 12),
-        Wall: new WallConfig(Cost: 80, BuildTime: 5, HpPerSegment: 120, MaxSegments: 2, Dps: 25, EngageTime: 2));
+        Barracks: new BarracksConfig(Cost: 200, BuildTime: 12));
 
     public static readonly DefenseConfig Defense = new(
         TowerCount: 2,
@@ -98,11 +95,11 @@ public static class Content
         ["archer"] = new(Cost: 70, BuildTime: 4, MarchTime: 4, HpFactor: 1.3, DpsFactor: 0.6, DefenseResistFactor: 0.7),
         ["cavalry"] = new(Cost: 90, BuildTime: 4, MarchTime: 2, HpFactor: 0.8, DpsFactor: 0.75),
         ["ninja"] = new(Cost: 130, BuildTime: 6, MarchTime: 4, HpFactor: 0.8, DpsFactor: 0.5,
-            Bypasses: new[] { "wall", "tower" }),
+            Bypasses: new[] { "tower" }),
         ["fire"] = new(Cost: 55, BuildTime: 2, MarchTime: 4, HpFactor: 0.5, DpsFactor: 0.4,
             DamageProfile: new Dictionary<string, double> { ["farm"] = 3, ["keep"] = 2.5 }),
         ["engineer"] = new(Cost: 90, BuildTime: 6, MarchTime: 7, HpFactor: 1.8, DpsFactor: 0.5,
-            DamageProfile: new Dictionary<string, double> { ["wall"] = 2.5, ["tower"] = 2 }),
+            DamageProfile: new Dictionary<string, double> { ["tower"] = 2 }),
     };
 
     public static readonly RageConfig Rage = new(Max: 10, FillRatePerSec: 10.0 / 90.0);

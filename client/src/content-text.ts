@@ -14,7 +14,7 @@ export const TROOP_TEXT: Record<string, TroopText> = {
   infantry: { name: "Infantry", blurb: "Heavy armor, slow" },
   archer: { name: "Archer", blurb: "Long range" },
   cavalry: { name: "Cavalry", blurb: "Fast shock" },
-  ninja: { name: "Ninja", blurb: "Scales the wall" },
+  ninja: { name: "Ninja", blurb: "Slips past the towers" },
   fire: { name: "Firestarter", blurb: "Burns what it reaches" },
   engineer: { name: "Siege Engineer", blurb: "Wrecks defenses" },
 };
@@ -32,15 +32,12 @@ export const COMMANDER_TEXT: Record<string, CommanderText> = {
 
 export const BUILDING_TEXT: Record<string, string> = {
   farm: "Farm",
-  wall: "Wall",
   barracks: "Barracks",
 };
 
 export const BUILD_IN_PROGRESS_TEXT: Record<string, string> = {
   farm: "Building farm",
-  wall: "Building wall",
   barracks: "Building barracks",
-  repairWall: "Repairing wall",
   repairTower: "Repairing tower",
 };
 

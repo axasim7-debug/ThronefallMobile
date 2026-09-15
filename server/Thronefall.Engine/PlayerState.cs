@@ -32,7 +32,6 @@ public sealed class CommanderInstance
 
 public sealed class MatchStats
 {
-    public int DiedAtWall;
     public int StoppedAtTower;
     public int ReachedKeep;
     public int TowersLost;
@@ -46,8 +45,6 @@ public sealed class PlayerState
     public double Gold { get; set; }
     public double Income { get; set; }
     public List<FarmInstance> Farms { get; } = new();
-    public double WallHp { get; set; }
-    public double WallMaxHp { get; set; }
     public bool HasBarracks { get; set; }
     public string? BuildBusy { get; set; }
     public double BuildTimer { get; set; }

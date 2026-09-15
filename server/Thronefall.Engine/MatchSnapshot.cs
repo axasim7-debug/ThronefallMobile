@@ -13,9 +13,9 @@ public sealed record StructureView(double Hp, double MaxHp, bool Destroyed);
 public sealed record FarmView(double Hp, double MaxHp, bool IncomeRemoved);
 
 // Progress is 0 at departure, 1 at arrival — plain linear interpolation, no
-// combat-stage granularity (the engine resolves wall/tower/farm/keep in one
-// tick on arrival, so there's nothing staged to report mid-flight). This is
-// what turns "troopsProduced went up" into an actual unit moving across the
+// combat-stage granularity (the engine resolves tower/farm/keep in one tick
+// on arrival, so there's nothing staged to report mid-flight). This is what
+// turns "troopsProduced went up" into an actual unit moving across the
 // field — see docs/ART_DIRECTION.md's opening finding.
 public sealed record MarchingTroopView(string TroopKey, double Progress);
 
@@ -29,8 +29,6 @@ public sealed record SideView(
     double Income,
     double IncomePenalty,
     IReadOnlyList<FarmView> Farms,
-    double WallHp,
-    double WallMaxHp,
     bool HasBarracks,
     string? BuildBusy,
     double BuildTimer,
@@ -93,8 +91,6 @@ public static class SnapshotBuilder
             Income: pl.Income,
             IncomePenalty: pl.Disruptions.Sum(d => d.Amount),
             Farms: pl.Farms.Select(f => new FarmView(f.Hp, farmCfg.Hp, f.IncomeRemoved)).ToList(),
-            WallHp: pl.WallHp,
-            WallMaxHp: pl.WallMaxHp,
             HasBarracks: pl.HasBarracks,
             BuildBusy: pl.BuildBusy,
             BuildTimer: pl.BuildTimer,
@@ -136,7 +132,6 @@ public static class SnapshotBuilder
         buildings = new
         {
             farm = new { cost = Content.Buildings.Farm.Cost, buildTime = Content.Buildings.Farm.BuildTime, maxCount = Content.Buildings.Farm.MaxCount },
-            wall = new { cost = Content.Buildings.Wall.Cost, buildTime = Content.Buildings.Wall.BuildTime, maxSegments = Content.Buildings.Wall.MaxSegments, hpPerSegment = Content.Buildings.Wall.HpPerSegment },
             barracks = new { cost = Content.Buildings.Barracks.Cost, buildTime = Content.Buildings.Barracks.BuildTime },
         },
         // No display names here — the client maps these same keys to English

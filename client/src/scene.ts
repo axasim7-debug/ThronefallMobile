@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import type { Catalog, MatchState, SideView } from "./protocol";
+import type { MatchState, SideView } from "./protocol";
 
 // Shared-battlefield placeholder scene: both plots visible at once — your
 // base near the camera, the enemy's mirrored across a river strip, matching
@@ -19,10 +19,10 @@ const RIVER_DEPTH = 1.6;
 const HALF_SPAN = PLOT_DEPTH + RIVER_DEPTH / 2;
 
 // Fractions of PLOT_DEPTH from the river inward — this is also the raid
-// order a troop actually resolves in (wall, then tower, then farm, then
-// keep), so it doubles as a rough "how far in" read even though combat
-// itself still resolves in one tick on arrival, not stage by stage.
-const LAYOUT = { wall: 0.18, tower: 0.36, econ: 0.58, keep: 0.86 };
+// order a troop actually resolves in (tower, then farm, then keep), so it
+// doubles as a rough "how far in" read even though combat itself still
+// resolves in one tick on arrival, not stage by stage.
+const LAYOUT = { tower: 0.36, econ: 0.58, keep: 0.86 };
 
 const COLORS = {
   sky: 0x141b2c,
@@ -31,7 +31,6 @@ const COLORS = {
   grid: 0x2f4d36,
   keep: 0xb9a06a,
   tower: 0x8f97a8,
-  wall: 0x7d7568,
   farm: 0xc8a13a,
   barracks: 0x9c5b3c,
   rubble: 0x3a3f4a,
@@ -43,8 +42,6 @@ export interface CityScene {
   scene: THREE.Scene;
   camera: THREE.PerspectiveCamera;
   onResize(width: number, height: number): void;
-  /** static content data from the server, needed to size built structures */
-  applyCatalog(catalog: Catalog): void;
   update(state: MatchState): void;
 }
 
@@ -57,7 +54,7 @@ function applyBuildProgress(mesh: THREE.Object3D, baseY: number, progress: numbe
 }
 
 interface Plot {
-  update(side: SideView, wallHpPerSegment: number): void;
+  update(side: SideView): void;
   /** world-space spawn point for this plot's outgoing troops */
   barracksAnchor: THREE.Vector3;
   /** world-space target point incoming troops march toward */
@@ -103,18 +100,6 @@ function buildPlot(scene: THREE.Scene, direction: 1 | -1, teamColor: number): Pl
     return tower;
   });
 
-  // --- wall: the front line, nearest the river ---
-  const wallSegments = [-1, 1].map((side) => {
-    const segment = new THREE.Mesh(
-      new THREE.BoxGeometry(4, 1, 0.5),
-      new THREE.MeshStandardMaterial({ color: COLORS.wall, roughness: 0.85 }),
-    );
-    segment.position.set(side * 2.2, 0.5, z(LAYOUT.wall * PLOT_DEPTH));
-    segment.visible = false;
-    scene.add(segment);
-    return segment;
-  });
-
   // --- farms ---
   const farmGeo = new THREE.BoxGeometry(1.6, 0.35, 1.6);
   const farms = [-1, 1].map((side) => {
@@ -137,7 +122,7 @@ function buildPlot(scene: THREE.Scene, direction: 1 | -1, teamColor: number): Pl
   const barracksAnchor = new THREE.Vector3(0, 0.7, z(LAYOUT.econ * PLOT_DEPTH));
   const keepAnchor = new THREE.Vector3(0, 0.7, z(LAYOUT.keep * PLOT_DEPTH));
 
-  function update(side: SideView, wallHpPerSegment: number) {
+  function update(side: SideView) {
     // keep: tint toward red as HP drops
     const keepFraction = side.keep.maxHp > 0 ? side.keep.hp / side.keep.maxHp : 0;
     keepMat.color.setHex(side.keep.destroyed ? COLORS.rubble : COLORS.keep);
@@ -164,16 +149,6 @@ function buildPlot(scene: THREE.Scene, direction: 1 | -1, teamColor: number): Pl
         const fraction = view.maxHp > 0 ? view.hp / view.maxHp : 1;
         material.emissive.setRGB(Math.max(0, 0.22 - fraction * 0.22), 0, 0);
       }
-    });
-
-    // wall: one visible segment per built segment, shrinking as it takes damage
-    const builtSegments = wallHpPerSegment > 0 ? Math.round(side.wallMaxHp / wallHpPerSegment) : 0;
-    wallSegments.forEach((segment, i) => {
-      segment.visible = i < builtSegments;
-      if (!segment.visible) return;
-      const fraction = side.wallMaxHp > 0 ? side.wallHp / side.wallMaxHp : 0;
-      segment.scale.y = Math.max(0.08, fraction);
-      segment.position.y = 0.5 * segment.scale.y;
     });
 
     // farms
@@ -290,14 +265,9 @@ export function buildCityScene(): CityScene {
   const outgoingPool = buildTroopPool(scene, 16, COLORS.you);
   const incomingPool = buildTroopPool(scene, 16, COLORS.enemy);
 
-  let wallHpPerSegment = 0;
-  function applyCatalog(catalog: Catalog) {
-    wallHpPerSegment = catalog.buildings.wall?.hpPerSegment ?? 0;
-  }
-
   function update(state: MatchState) {
-    yours.update(state.you, wallHpPerSegment);
-    enemy.update(state.enemy, wallHpPerSegment);
+    yours.update(state.you);
+    enemy.update(state.enemy);
 
     // your outgoing troops travel from your barracks to the enemy's keep;
     // the enemy's outgoing troops travel from theirs to yours
@@ -310,5 +280,5 @@ export function buildCityScene(): CityScene {
     camera.updateProjectionMatrix();
   }
 
-  return { scene, camera, onResize, applyCatalog, update };
+  return { scene, camera, onResize, update };
 }

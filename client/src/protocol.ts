@@ -40,8 +40,6 @@ export interface SideView {
   income: number;
   incomePenalty: number;
   farms: FarmView[];
-  wallHp: number;
-  wallMaxHp: number;
   hasBarracks: boolean;
   /** null when the single build slot is idle — the server always sends the key */
   buildBusy: string | null;
@@ -74,8 +72,6 @@ export interface BuildingCatalogEntry {
   cost: number;
   buildTime: number;
   maxCount?: number;
-  maxSegments?: number;
-  hpPerSegment?: number;
 }
 
 export interface TroopCatalogEntry {
@@ -204,7 +200,6 @@ const REFUSAL_TEXT: Record<string, string> = {
   "training-slot-busy": "Barracks is busy",
   "no-barracks": "You need a barracks first",
   "farm-limit-reached": "Farm limit reached",
-  "wall-already-complete": "Wall is already complete",
   "barracks-already-built": "Barracks already built",
   "unknown-troop": "Unknown troop",
   "unknown-building": "Unknown building",

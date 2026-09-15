@@ -184,9 +184,6 @@ export class Hud {
         disabled = you.buildBusy !== null || you.gold < entry.cost;
         if (action.arg === "farm" && you.farms.length >= (entry.maxCount ?? Infinity)) disabled = true;
         if (action.arg === "barracks" && you.hasBarracks) disabled = true;
-        if (action.arg === "wall" && entry.maxSegments !== undefined && entry.hpPerSegment !== undefined) {
-          disabled = disabled || you.wallMaxHp >= entry.maxSegments * entry.hpPerSegment;
-        }
       } else if (action.kind === "train") {
         const entry = this.catalog.troops[action.arg];
         disabled = !you.hasBarracks || you.troopBusy || you.gold < entry.cost;

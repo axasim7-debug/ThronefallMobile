@@ -11,24 +11,23 @@ const ECONOMY = {
 
 const BUILDINGS = {
   // farms are a real attack target (like Clash Royale's Elixir Collector):
-  // troops that clear the wall+towers burn the nearest surviving farm
-  // before they ever reach the keep. Destroying one does two things:
-  // removes its future income permanently, AND applies a temporary extra
-  // production penalty (disruptionPenalty, for disruptionSeconds) on top.
-  // Tried a flat "claw back banked gold" penalty first — it barely moved
-  // outcomes, because every strategy here spends close to as fast as it
-  // earns, so there's rarely much cash sitting around to grab. A temporary
-  // income penalty can't be dodged that way: it hits future production
-  // directly. See docs/PROGRESS.md for the full history.
+  // troops that clear the towers burn the nearest surviving farm before
+  // they ever reach the keep. Destroying one does two things: removes its
+  // future income permanently, AND applies a temporary extra production
+  // penalty (disruptionPenalty, for disruptionSeconds) on top. Tried a flat
+  // "claw back banked gold" penalty first — it barely moved outcomes,
+  // because every strategy here spends close to as fast as it earns, so
+  // there's rarely much cash sitting around to grab. A temporary income
+  // penalty can't be dodged that way: it hits future production directly.
+  // See docs/PROGRESS.md for the full history.
   farm: {
     cost: 150, buildTime: 8, incomeBonus: 5, hp: 60, maxCount: 2, assaultEngageTime: 2,
     disruptionPenalty: 6, disruptionSeconds: 40,
   },
   barracks: { cost: 200, buildTime: 12 },
-  wall: {
-    cost: 80, buildTime: 5, hpPerSegment: 120, maxSegments: 2,
-    dps: 25, engageTime: 2, // damage it deals to a passing troop, and for how long
-  },
+  // No wall — removed deliberately (see docs/PROGRESS.md). The only
+  // buildable structures are farm and barracks; keep + towers are the fixed
+  // baseline defense every player starts a match with.
 };
 
 // Baseline defense every player starts a match with (not built in-match —
@@ -51,7 +50,7 @@ const DEFENSE = {
   reinforce: { startFraction: 0.35, rampSeconds: 90 },
 };
 
-// Repair: rebuilds a damaged wall/tower. cost/time scale with missing HP.
+// Repair: rebuilds a damaged tower. cost/time scale with missing HP.
 const REPAIR = { costPerMissingHP: 0.6, timePerMissingHP: 0.08 };
 
 // Troop cards. hpFactor/dpsFactor multiply the troop's own gold cost to get
@@ -76,9 +75,9 @@ const TROOPS = {
     hpFactor: 0.8, dpsFactor: 0.75, // still the fastest, no longer the strongest outright
   },
   ninja: {
-    name: "نينجا — يتسلق الأسوار", cost: 130, buildTime: 6, marchTime: 4,
+    name: "نينجا — يتسلل خلف الأبراج", cost: 130, buildTime: 6, marchTime: 4,
     hpFactor: 0.8, dpsFactor: 0.5,
-    bypasses: ["wall", "tower"], // climbs straight past both — a costly precision infiltrator, not a brawler
+    bypasses: ["tower"], // slips straight past — a costly precision infiltrator, not a brawler
   },
   fire: {
     name: "حارق — يشعل ما يصل إليه", cost: 55, buildTime: 2, marchTime: 4,
@@ -88,7 +87,7 @@ const TROOPS = {
   engineer: {
     name: "مهندس حصار — يهدم الدفاع", cost: 90, buildTime: 6, marchTime: 7,
     hpFactor: 1.8, dpsFactor: 0.5,
-    damageProfile: { wall: 2.5, tower: 2 }, // built to punish a wall/tower-heavy defense specifically
+    damageProfile: { tower: 2 }, // built to punish a tower-heavy defense specifically
   },
 };
 

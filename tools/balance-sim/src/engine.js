@@ -4,10 +4,10 @@
 // A troop's combat behavior is data-driven via three optional fields on its
 // content.js entry — most new troops (even unusual ones) should only need
 // these, not a change to this file:
-//   - bypasses: string[]   stages this troop skips entirely, e.g. ["wall",
-//                          "tower"] for a wall-climbing infiltrator
+//   - bypasses: string[]   stages this troop skips entirely, e.g. ["tower"]
+//                          for a precision infiltrator
 //   - damageProfile: {}    per-target-type damage multiplier, e.g.
-//                          { wall: 2, tower: 2 } for a siege specialist, or
+//                          { tower: 2 } for a siege specialist, or
 //                          { farm: 3, keep: 3 } for an arsonist
 //   - defenseResistFactor  multiplier on the return damage structures deal
 //                          to this troop (e.g. 0.7 for a ranged attacker)
@@ -39,8 +39,6 @@ function initPlayer(strategy, content, squad) {
     gold: content.ECONOMY.startGold,
     income: content.ECONOMY.baseIncome,
     farms: [],
-    wallHP: 0,
-    wallMaxHP: 0,
     hasBarracks: false,
     buildBusy: null,
     buildTimer: 0,
@@ -75,14 +73,13 @@ function initPlayer(strategy, content, squad) {
       for (const skill of order) levels[skill] = e.levels?.[skill] ?? 3;
       return { key: e.key, levels, rage: 0, casts: 0 };
     }),
-    stats: { diedAtWall: 0, stoppedAtTower: 0, reachedKeep: 0, towersLost: 0, repairsDone: 0, farmsRaided: 0 },
+    stats: { stoppedAtTower: 0, reachedKeep: 0, towersLost: 0, repairsDone: 0, farmsRaided: 0 },
     barracksT: null,
     firstTroopT: null,
   };
 }
 
 function damagedStructure(pl, t, content) {
-  if (pl.wallMaxHP > 0 && pl.wallHP < pl.wallMaxHP) return "wall";
   const t1 = pl.towers.find((s) => currentHP(s, t, content) < ceiling(s.maxHp, t, content));
   if (t1) return t1;
   return null;
@@ -92,13 +89,6 @@ function startRepair(pl, content, t) {
   const need = damagedStructure(pl, t, content);
   if (!need) return false;
   const { costPerMissingHP, timePerMissingHP } = content.REPAIR;
-  if (need === "wall") {
-    const missing = pl.wallMaxHP - pl.wallHP;
-    const cost = Math.ceil(missing * costPerMissingHP);
-    if (pl.gold < cost) return false;
-    pl.gold -= cost; pl.buildBusy = "repairWall"; pl.buildTimer = Math.ceil(missing * timePerMissingHP);
-    return true;
-  }
   const missing = ceiling(need.maxHp, t, content) - currentHP(need, t, content);
   const cost = Math.ceil(missing * costPerMissingHP);
   if (pl.gold < cost) return false;
@@ -120,8 +110,8 @@ function damageStructure(structure, dmg, t, content) {
   if (!structure.destroyed && currentHP(structure, t, content) <= 0) structure.destroyed = true;
 }
 
-// dmg multiplier this troop deals to a given target type ("wall"/"tower"/
-// "farm"/"keep"); defaults to 1 for anything not in the troop's profile
+// dmg multiplier this troop deals to a given target type ("tower"/"farm"/
+// "keep"); defaults to 1 for anything not in the troop's profile
 function dmgMult(troop, targetType) {
   return (troop.damageProfile && troop.damageProfile[targetType]) ?? 1;
 }
@@ -132,8 +122,8 @@ function resistMult(troop) {
   return troop.defenseResistFactor ?? 1;
 }
 
-// "الحارسة" passive: own wall/tower/keep take reduced damage (farms are
-// not covered — her theme is core defenses, not economy buildings)
+// "الحارسة" passive: own tower/keep take reduced damage (farms are not
+// covered — her theme is core defenses, not economy buildings)
 function guardianDamageMult(pl, content) {
   const cmd = pl.commanders.find((c) => c.key === "guardian");
   if (!cmd) return 1;
@@ -150,18 +140,9 @@ function isMastered(cmd) {
 function resolveAttack(defender, troop, content, t) {
   if (defender.keepDestroyedAtT !== null) return;
   let hp = troop.hp;
-  const { wall } = content.BUILDINGS;
   const { tower, crossFireFactor, keep } = content.DEFENSE;
   const bypasses = troop.bypasses || [];
   const gMult = guardianDamageMult(defender, content);
-
-  if (!bypasses.includes("wall") && defender.wallHP > 0) {
-    const dmgToTroop = wall.dps * resistMult(troop) * wall.engageTime;
-    const dmgToWall = troop.dps * dmgMult(troop, "wall") * wall.engageTime * gMult;
-    defender.wallHP = Math.max(0, defender.wallHP - dmgToWall);
-    hp -= dmgToTroop;
-    if (hp <= 0) { defender.stats.diedAtWall++; return; }
-  }
 
   if (!bypasses.includes("tower")) {
     const alive = defender.towers.filter((s) => !s.destroyed);
@@ -184,8 +165,8 @@ function resolveAttack(defender, troop, content, t) {
 
   if (hp <= 0) return;
 
-  // troops that broke through go after the economy first — an unwalled
-  // farm is a real, undefended target, same as Clash Royale's collector
+  // troops that broke through go after the economy first — an undefended
+  // farm is a real target, same as Clash Royale's collector
   const farm = content.BUILDINGS.farm;
   const targetFarm = defender.farms.find((f) => f.hp > 0);
   if (targetFarm) {
@@ -221,16 +202,9 @@ function advanceBuild(pl, content, t) {
       pl.income += content.BUILDINGS.farm.incomeBonus;
       break;
     }
-    case "wall":
-      pl.wallHP += content.BUILDINGS.wall.hpPerSegment;
-      break;
     case "barracks":
       pl.hasBarracks = true;
       pl.barracksT = t;
-      break;
-    case "repairWall":
-      pl.wallHP = pl.wallMaxHP;
-      pl.stats.repairsDone++;
       break;
     case "repairTower":
       pl._repairTarget.damageTaken = 0;
@@ -356,15 +330,10 @@ function applyCommanderCast({ self, opponent, eff }, content, t) {
       }
     }
   } else if (eff.kind === "repairStructure") {
-    const wallDamaged = self.wallMaxHP > 0 && self.wallHP < self.wallMaxHP;
-    if (wallDamaged) {
-      self.wallHP = Math.min(self.wallMaxHP, self.wallHP + eff.amount);
-    } else {
-      const tower = self.towers.filter((s) => s.damageTaken > 0).sort((a, b) => b.damageTaken - a.damageTaken)[0];
-      if (tower) {
-        tower.damageTaken = Math.max(0, tower.damageTaken - eff.amount);
-        if (tower.destroyed && currentHP(tower, t, content) > 0) tower.destroyed = false;
-      }
+    const tower = self.towers.filter((s) => s.damageTaken > 0).sort((a, b) => b.damageTaken - a.damageTaken)[0];
+    if (tower) {
+      tower.damageTaken = Math.max(0, tower.damageTaken - eff.amount);
+      if (tower.destroyed && currentHP(tower, t, content) > 0) tower.destroyed = false;
     }
   }
 }
