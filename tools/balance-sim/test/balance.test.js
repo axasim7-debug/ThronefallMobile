@@ -133,6 +133,16 @@ test("per-troop sanity: no single troop type causes an instant collapse or a no-
     for (const defenderName of ["eco", "def"]) {
       const { A, B } = simulate(attacker, ALL[defenderName], content);
       assert.ok(A.troopsProduced > 0, `${troopKey}: attacker never produced a troop`);
+      // Caught a real bug this way: a commander passive (shadow's
+      // marchTimeMult) could make a troop's arrival tick fractional, which
+      // silently never matched the integer tick loop — the troop was
+      // "produced" but never actually attacked. A mono-troop attacker
+      // fields its own full commander squad (see monoTroop's comment), so
+      // this exercises exactly that combination.
+      const defenderActivity = B.stats.diedAtWall + B.stats.stoppedAtTower + B.stats.reachedKeep + B.stats.farmsRaided;
+      assert.ok(defenderActivity > 0,
+        `${troopKey} vs ${defenderName}: attacker produced ${A.troopsProduced} troops but none of them ` +
+        `ever resolved an attack (defender combat stats all zero) — troops are vanishing before arrival`);
       if (B.keepDestroyedAtT !== null) {
         assert.ok(B.keepDestroyedAtT >= 60,
           `${troopKey} alone destroyed ${defenderName}'s keep in ${B.keepDestroyedAtT}s — ` +

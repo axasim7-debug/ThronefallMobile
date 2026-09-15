@@ -269,7 +269,13 @@ function advanceTroop(pl, content, t, onSpawn) {
   }
 
   onSpawn({
-    arriveAt: t + marchTime,
+    // rounded to a whole tick: a passive (shadow's marchTimeMult) can make
+    // this fractional, and the tick loop only ever looks up integer keys —
+    // an un-rounded arrival silently never matches, so the troop vanishes
+    // without ever attacking. Found by noticing a mono-ninja attacker (with
+    // its own shadow commander) produced troops but the defender's combat
+    // stats stayed all-zero.
+    arriveAt: t + Math.round(marchTime),
     hp, dps,
     bypasses: troopDef.bypasses,
     damageProfile: troopDef.damageProfile,
