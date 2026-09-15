@@ -70,8 +70,10 @@ const TROOPS = {
     hpFactor: 1.3, dpsFactor: 0.6, defenseResistFactor: 0.7, // shoots from range: takes less return fire
   },
   cavalry: {
-    name: "فرسان — صدمة سريعة", cost: 80, buildTime: 4, marchTime: 2,
-    hpFactor: 0.9, dpsFactor: 1.1, // fast, hits hard, dies to almost anything
+    // v1 (cost80/dps1.1/hp0.9) won solo mono-troop runs by a huge margin
+    // (149-169s vs 218-267s for everything else) — tested and retuned.
+    name: "فرسان — صدمة سريعة", cost: 90, buildTime: 4, marchTime: 2,
+    hpFactor: 0.8, dpsFactor: 0.75, // still the fastest, no longer the strongest outright
   },
   ninja: {
     name: "نينجا — يتسلق الأسوار", cost: 130, buildTime: 6, marchTime: 4,
