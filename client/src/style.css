@@ -58,3 +58,260 @@ body {
   padding: 10px calc(var(--safe-right) + 14px) calc(var(--safe-bottom) + 14px) calc(var(--safe-left) + 14px);
   pointer-events: auto;
 }
+
+/* ---------------------------------------------------------------------------
+   HUD — placeholder styling. Readable and thumb-reachable, but deliberately
+   plain: the Clash-Royale-style art pass replaces all of this. What matters
+   here is that every value shown is server-driven and every control is a real
+   command.
+   --------------------------------------------------------------------------- */
+
+#hud-top {
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: linear-gradient(180deg, rgba(6, 9, 16, 0.85), rgba(6, 9, 16, 0));
+}
+
+.bar-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.resource {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 700;
+  font-size: 18px;
+  color: #ffd66b;
+}
+
+.coin {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #ffe79a, #d99a1d 70%);
+  box-shadow: 0 0 0 1px #8a6210 inset;
+}
+
+.income {
+  font-size: 12px;
+  font-weight: 600;
+  color: #9fd6a0;
+}
+
+.income.penalized {
+  color: #ff8b6b;
+}
+
+.clock {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  font-size: 18px;
+  color: #e8edf7;
+}
+
+.keeps {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.keep-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: #c3cbdb;
+}
+
+.keep-label {
+  min-width: 44px;
+}
+
+.hp-track {
+  flex: 1;
+  height: 8px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.14);
+  overflow: hidden;
+}
+
+.hp-fill {
+  height: 100%;
+  width: 100%;
+  border-radius: 4px;
+  transition: width 220ms linear;
+}
+
+.you-fill {
+  background: linear-gradient(90deg, #4fc27a, #8ee6a1);
+}
+
+.enemy-fill {
+  background: linear-gradient(90deg, #d0574d, #ef8b7b);
+}
+
+.hp-fill.critical {
+  background: linear-gradient(90deg, #ff4d4d, #ffa06b);
+}
+
+.keep-text {
+  min-width: 34px;
+  text-align: left;
+  font-variant-numeric: tabular-nums;
+}
+
+.tower-pips {
+  display: flex;
+  gap: 3px;
+}
+
+.pip {
+  width: 7px;
+  height: 7px;
+  border-radius: 2px;
+  background: #7fd0ff;
+}
+
+.pip.down {
+  background: #55606f;
+}
+
+.status {
+  font-size: 11px;
+  color: #93a0b5;
+}
+
+#hud-bottom {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: linear-gradient(0deg, rgba(6, 9, 16, 0.92), rgba(6, 9, 16, 0));
+}
+
+.row {
+  display: flex;
+  gap: 6px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.action {
+  flex: 1 1 0;
+  min-width: 56px;
+  min-height: 46px; /* thumb target */
+  padding: 6px 4px;
+  border: 0;
+  border-radius: 10px;
+  background: #2b3444;
+  color: #e6ecf7;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  cursor: pointer;
+}
+
+.action:active:not(:disabled) {
+  transform: translateY(1px);
+  background: #38455a;
+}
+
+.action:disabled {
+  opacity: 0.4;
+}
+
+.action-price {
+  font-size: 10px;
+  color: #ffd66b;
+  font-variant-numeric: tabular-nums;
+}
+
+.action-price.unaffordable {
+  color: #ff8b6b;
+}
+
+.commanders {
+  gap: 8px;
+}
+
+.commander {
+  position: relative;
+  flex: 1 1 0;
+  min-height: 52px;
+  border: 0;
+  border-radius: 10px;
+  background: #241f33;
+  color: #e6ecf7;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.commander:disabled {
+  opacity: 0.55;
+}
+
+/* the rage bar fills from the bottom — the one resource the player times */
+.rage-fill {
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 0%;
+  background: linear-gradient(0deg, #7b3ff2, #b98bff);
+  transition: height 220ms linear;
+}
+
+.commander-label {
+  position: relative;
+}
+
+.commander.ready {
+  box-shadow: 0 0 0 2px #ffd66b inset;
+}
+
+.commander.mastered .commander-label::after {
+  content: " ★";
+  color: #ffd66b;
+}
+
+.toast {
+  align-self: center;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgba(200, 60, 50, 0.92);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.banner {
+  align-self: center;
+  padding: 10px 18px;
+  border-radius: 12px;
+  font-size: 16px;
+  font-weight: 800;
+  color: #0b0e14;
+}
+
+.banner.win {
+  background: #7ee6a1;
+}
+
+.banner.lose {
+  background: #ef8b7b;
+}
+
+.banner.draw,
+.banner.info {
+  background: #c3cbdb;
+}

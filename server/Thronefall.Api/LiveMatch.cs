@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Thronefall.Engine;
 
 namespace Thronefall.Api;
@@ -37,6 +38,10 @@ public static class LiveMatch
     private static readonly JsonSerializerOptions Json = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        // CommandKind must go over the wire as "build"/"castRage", not as the
+        // enum's ordinal. A number here is unreadable to the client and would
+        // silently shift if the enum ever gained a member.
+        Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) },
     };
 
     public static async Task HandleAsync(HttpContext context)

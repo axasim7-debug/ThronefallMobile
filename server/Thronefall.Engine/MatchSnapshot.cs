@@ -117,7 +117,7 @@ public static class SnapshotBuilder
         buildings = new
         {
             farm = new { cost = Content.Buildings.Farm.Cost, buildTime = Content.Buildings.Farm.BuildTime, maxCount = Content.Buildings.Farm.MaxCount },
-            wall = new { cost = Content.Buildings.Wall.Cost, buildTime = Content.Buildings.Wall.BuildTime, maxSegments = Content.Buildings.Wall.MaxSegments },
+            wall = new { cost = Content.Buildings.Wall.Cost, buildTime = Content.Buildings.Wall.BuildTime, maxSegments = Content.Buildings.Wall.MaxSegments, hpPerSegment = Content.Buildings.Wall.HpPerSegment },
             barracks = new { cost = Content.Buildings.Barracks.Cost, buildTime = Content.Buildings.Barracks.BuildTime },
         },
         troops = Content.Troops.ToDictionary(
