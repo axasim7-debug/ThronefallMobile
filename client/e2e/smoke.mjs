@@ -138,6 +138,7 @@ const press = (row, label) =>
 
 let trained = 0;
 let casts = 0;
+let midShot = false;
 for (let i = 0; i < 200; i++) {
   if (await page.evaluate(() => document.querySelector(".banner")?.hidden === false)) break;
   await press(".builds", "ثكنة");
@@ -147,7 +148,12 @@ for (let i = 0; i < 200; i++) {
     ready.forEach((c) => c.click());
     return ready.length;
   });
-  if (i === 20) await shot("02-playing");
+  // capture as soon as the base is actually doing something, not at a fixed
+  // iteration — a fast match can end before any fixed index is reached
+  if (!midShot && trained > 0) {
+    midShot = true;
+    await shot("02-playing");
+  }
   await page.waitForTimeout(250);
 }
 
