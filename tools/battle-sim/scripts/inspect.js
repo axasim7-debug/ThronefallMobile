@@ -111,62 +111,18 @@ console.log("\n--- kiting: full trace ---");
   console.log(`  closest the tank ever got: ${closestApproach.toFixed(2)} (its melee range is ${UNIT_PROFILES.tank.range})`);
 }
 
-console.log("\n--- wall blocking: position trace ---");
-{
-  const b = new Battle();
-  const wall = b.addStructure({
-    side: "B", x: 0, z: 0, hp: 200, dps: 5, range: 1.0, key: "wall",
-    blockRect: { minX: -3, maxX: 3, minZ: -0.5, maxZ: 0.5 },
-  });
-  const attacker = b.addUnit({ side: "A", x: 0, z: -10, ...UNIT_PROFILES.tank });
-  b.moveUnit(attacker, 0, 5);
-  const trace = [];
-  for (let i = 0; i < 60 && !b.structures.get(wall).destroyed; i++) {
-    b.step();
-    if (i % 5 === 0) trace.push(`t=${b.time.toFixed(1)} z=${b.units.get(attacker).z.toFixed(2)} wallHp=${b.structures.get(wall).hp.toFixed(0)}`);
-  }
-  console.log(trace.join("\n"));
-  console.log(`final: wall destroyed=${b.structures.get(wall).destroyed}, attacker z=${b.units.get(attacker).z.toFixed(2)} (approached from z=-10, wall face at z=0)`);
-}
-
-console.log("\n--- resume-after-wall-falls: position trace ---");
-{
-  const b = new Battle();
-  const wall = b.addStructure({
-    side: "B", x: 0, z: 0, hp: 40, dps: 0, range: 1.0, key: "wall",
-    blockRect: { minX: -3, maxX: 3, minZ: -0.5, maxZ: 0.5 },
-  });
-  const attacker = b.addUnit({ side: "A", x: 0, z: -10, ...UNIT_PROFILES.tank });
-  b.moveUnit(attacker, 0, 5);
-  let fellAt = null;
-  for (let i = 0; i < 100; i++) {
-    b.step();
-    if (fellAt === null && b.structures.get(wall).destroyed) fellAt = { t: b.time, z: b.units.get(attacker).z };
-  }
-  console.log(`wall fell at t=${fellAt.t.toFixed(2)}, attacker z at that moment=${fellAt.z.toFixed(2)}`);
-  console.log(`attacker z 40 ticks later=${b.units.get(attacker).z.toFixed(2)} (waypoint target was z=5, never re-issued)`);
-}
-
-console.log("\n--- full base raid: real client layout (wall gap + 2 towers + keep), mixed attacking force ---");
+console.log("\n--- full base raid: real client layout (2 towers + keep), mixed attacking force ---");
 {
   // exact numbers from client/src/scene.ts's actual layout, not invented:
-  // PLOT_DEPTH=7.5, LAYOUT={wall:0.18, tower:0.36, econ:0.58, keep:0.86}
+  // PLOT_DEPTH=7.5, LAYOUT={tower:0.36, econ:0.58, keep:0.86}
   const PLOT_DEPTH = 7.5;
-  const wallZ = 0.18 * PLOT_DEPTH, towerZ = 0.36 * PLOT_DEPTH, keepZ = 0.86 * PLOT_DEPTH;
+  const towerZ = 0.36 * PLOT_DEPTH, keepZ = 0.86 * PLOT_DEPTH;
 
   function buildDefense(b) {
-    const wallLeft = b.addStructure({
-      side: "B", x: -2.2, z: wallZ, hp: 240, dps: 25, range: 1.5, key: "wall",
-      blockRect: { minX: -4.2, maxX: -0.2, minZ: wallZ - 0.25, maxZ: wallZ + 0.25 },
-    });
-    const wallRight = b.addStructure({
-      side: "B", x: 2.2, z: wallZ, hp: 240, dps: 25, range: 1.5, key: "wall",
-      blockRect: { minX: 0.2, maxX: 4.2, minZ: wallZ - 0.25, maxZ: wallZ + 0.25 },
-    });
     const towerLeft = b.addStructure({ side: "B", x: -3, z: towerZ, ...STRUCTURE_PROFILES.tower, key: "tower" });
     const towerRight = b.addStructure({ side: "B", x: 3, z: towerZ, ...STRUCTURE_PROFILES.tower, key: "tower" });
     const keep = b.addStructure({ side: "B", x: 0, z: keepZ, ...STRUCTURE_PROFILES.keep, key: "keep" });
-    return { wallLeft, wallRight, towerLeft, towerRight, keep };
+    return { towerLeft, towerRight, keep };
   }
 
   function mixedForce(b, startX) {
@@ -178,12 +134,7 @@ console.log("\n--- full base raid: real client layout (wall gap + 2 towers + kee
     ];
   }
 
-  console.log("\n[raid A] straight up the middle (x=0) — a spread-out formation, not single-file");
-  console.log("  NOTE: the two flanking skirmishers start offset ±0.5 from center. The gap between");
-  console.log("  wall segments is only 0.4 wide (-0.2..0.2), so a straight path from x=-0.5 toward");
-  console.log("  x=0 clips the left wall's edge at x≈-0.223 partway through — confirmed deliberately");
-  console.log("  below with a single dead-center unit, which threads the gap with the wall untouched.");
-  console.log("  This is a real tactical fact (narrow gap vs. formation spread), not an engine bug.");
+  console.log("\n[raid] straight up the middle (x=0) — a spread-out formation, not single-file");
   {
     const b = new Battle();
     const def = buildDefense(b);
@@ -193,44 +144,9 @@ console.log("\n--- full base raid: real client layout (wall gap + 2 towers + kee
     while (ticks < 2000 && b.aliveUnits("A").length > 0 &&
            !(b.structures.get(def.keep).destroyed)) { b.step(); ticks++; }
     console.log(`  after ${b.time.toFixed(1)}s: survivors=${b.aliveUnits("A").length}/4` +
-      `  wallLeft hp=${b.structures.get(def.wallLeft).hp.toFixed(0)}/240 (clipped by the offset skirmisher's path)` +
-      `  wallRight hp=${b.structures.get(def.wallRight).hp.toFixed(0)}/240 (untouched — right-side units never approached it)` +
       `  keep hp=${b.structures.get(def.keep).hp.toFixed(0)}/${STRUCTURE_PROFILES.keep.hp}`);
     console.log(`  towers: left=${b.structures.get(def.towerLeft).hp.toFixed(0)}/700  right=${b.structures.get(def.towerRight).hp.toFixed(0)}/700`);
+    console.log(`  NOTE: no wall — the design pivoted away from a static physical obstacle (see docs/PROGRESS.md).`+
+      ` Defense now leans entirely on tower/keep range + DPS and the defender's own live unit play.`);
   }
-
-  console.log("\n[raid B] straight at the left wall segment (x=-2.2) — should be forced to fight it first");
-  {
-    const b = new Battle();
-    const def = buildDefense(b);
-    const attackers = mixedForce(b, -2.2);
-    for (const id of attackers) b.moveUnit(id, -2.2, keepZ);
-    let ticks = 0;
-    while (ticks < 2000 && b.aliveUnits("A").length > 0 &&
-           !(b.structures.get(def.keep).destroyed)) { b.step(); ticks++; }
-    console.log(`  after ${b.time.toFixed(1)}s: survivors=${b.aliveUnits("A").length}/4` +
-      `  wallLeft hp=${b.structures.get(def.wallLeft).hp.toFixed(0)}/240 (should be damaged/dead)` +
-      `  keep hp=${b.structures.get(def.keep).hp.toFixed(0)}/${STRUCTURE_PROFILES.keep.hp} (should still be full while wall stands)`);
-  }
-}
-
-console.log("\n[confirm] a single dead-center unit threads the gap with the wall untouched");
-{
-  const PLOT_DEPTH = 7.5;
-  const wallZ = 0.18 * PLOT_DEPTH, keepZ = 0.86 * PLOT_DEPTH;
-  const b = new Battle();
-  const wallLeft = b.addStructure({ side: "B", x: -2.2, z: wallZ, hp: 240, dps: 25, range: 1.5, key: "wall",
-    blockRect: { minX: -4.2, maxX: -0.2, minZ: wallZ - 0.25, maxZ: wallZ + 0.25 } });
-  const wallRight = b.addStructure({ side: "B", x: 2.2, z: wallZ, hp: 240, dps: 25, range: 1.5, key: "wall",
-    blockRect: { minX: 0.2, maxX: 4.2, minZ: wallZ - 0.25, maxZ: wallZ + 0.25 } });
-  const keep = b.addStructure({ side: "B", x: 0, z: keepZ, ...STRUCTURE_PROFILES.keep });
-  const tank = b.addUnit({ side: "A", x: 0, z: -5, ...UNIT_PROFILES.tank });
-  b.moveUnit(tank, 0, keepZ);
-  let ticks = 0;
-  while (ticks < 2000 && b.units.get(tank).alive && !b.structures.get(keep).destroyed) { b.step(); ticks++; }
-  console.log(`  wallLeft=${b.structures.get(wallLeft).hp}/240  wallRight=${b.structures.get(wallRight).hp}/240  ` +
-    `(both should read 240/240 — untouched)  tank survived=${b.units.get(tank).alive}`);
-  console.log(`  NOTE: the lone tank still died — killed by the two towers' range (6.0) before it ever got` +
-    ` within its own melee range (1.2) to fight back. A tower-range advantage that steep is a real` +
-    ` balance fact for later tuning, not a bug: an unsupported melee raid currently cannot survive it.`);
 }

@@ -45,41 +45,6 @@ function moveToward(entity, target, maxStep) {
 }
 
 /**
- * Standard slab-method segment-vs-AABB test: does the straight path from
- * (x1,z1) to (x2,z2) enter `rect`, and if so, where does it first cross the
- * boundary? Returns null for no intersection within this segment.
- *
- * This is what makes a wall an actual obstacle rather than just another
- * target a unit happens to be near. Without it, "build a wall" would be
- * cosmetic — nothing would stop an attacker from walking straight past one
- * to whatever's behind it.
- */
-function segmentRectEntry(x1, z1, x2, z2, rect) {
-  const dx = x2 - x1, dz = z2 - z1;
-  let tmin = 0, tmax = 1;
-  if (dx === 0) {
-    if (x1 < rect.minX || x1 > rect.maxX) return null;
-  } else {
-    let t1 = (rect.minX - x1) / dx, t2 = (rect.maxX - x1) / dx;
-    if (t1 > t2) [t1, t2] = [t2, t1];
-    tmin = Math.max(tmin, t1);
-    tmax = Math.min(tmax, t2);
-    if (tmin > tmax) return null;
-  }
-  if (dz === 0) {
-    if (z1 < rect.minZ || z1 > rect.maxZ) return null;
-  } else {
-    let t1 = (rect.minZ - z1) / dz, t2 = (rect.maxZ - z1) / dz;
-    if (t1 > t2) [t1, t2] = [t2, t1];
-    tmin = Math.max(tmin, t1);
-    tmax = Math.min(tmax, t2);
-    if (tmin > tmax) return null;
-  }
-  if (tmin < 0 || tmin > 1) return null;
-  return { t: tmin, x: x1 + dx * tmin, z: z1 + dz * tmin };
-}
-
-/**
  * A live battle. Two sides ("A"/"B"), each a list of units plus fixed
  * structures. Advance with step(dt); issue orders with moveUnit(id, x, z)
  * at any time between steps — exactly like a player dragging a card.
@@ -102,13 +67,10 @@ class Battle {
     return id;
   }
 
-  /** blockRect: {minX, maxX, minZ, maxZ} — omit for a structure that doesn't
-   * physically obstruct movement (towers, keep: standalone point targets).
-   * Only walls set this in practice. */
-  addStructure({ side, x, z, hp, dps, range, key = "structure", blockRect = null }) {
+  addStructure({ side, x, z, hp, dps, range, key = "structure" }) {
     const id = `s${this._nextId++}`;
     this.structures.set(id, {
-      id, key, side, x, z, hp, maxHp: hp, dps, range, destroyed: false, blockRect,
+      id, key, side, x, z, hp, maxHp: hp, dps, range, destroyed: false,
     });
     return id;
   }
@@ -146,19 +108,6 @@ class Battle {
     return best;
   }
 
-  /** The nearest point along entity's straight path to `dest` where a
-   * standing enemy wall blocks the way, or null if the path is clear. */
-  _firstBlockingWall(entity, dest) {
-    const enemySide = entity.side === "A" ? "B" : "A";
-    let best = null;
-    for (const s of this.aliveStructures(enemySide)) {
-      if (!s.blockRect) continue;
-      const hit = segmentRectEntry(entity.x, entity.z, dest.x, dest.z, s.blockRect);
-      if (hit && (!best || hit.t < best.hit.t)) best = { structure: s, hit };
-    }
-    return best;
-  }
-
   /** Advance the battle by dt seconds: move anything with an order, then
    * resolve all engagements simultaneously (damage computed off
    * start-of-tick targets, applied all at once — the same
@@ -178,17 +127,13 @@ class Battle {
     //    for a later pass with real unit footprints; it doesn't affect the
     //    combat math this prototype exists to validate.)
     //
-    //    A standing enemy wall crossing the path is the one thing that DOES
-    //    redirect movement: the destination for this tick becomes the wall's
-    //    entry point instead of the real waypoint, and — the important part —
-    //    the waypoint itself is NOT cleared, so the original order resumes
-    //    automatically the moment the wall falls.
+    //    There is deliberately no physical obstruction here (see the removed
+    //    wall-blocking system in docs/PROGRESS.md) — a waypoint always drives
+    //    a unit straight to its real destination.
     for (const u of this.aliveUnits()) {
       if (!u.waypoint) continue;
-      const blocker = this._firstBlockingWall(u, u.waypoint);
-      const dest = blocker ? blocker.hit : u.waypoint;
-      const arrived = moveToward(u, dest, u.speed * dt);
-      if (arrived && !blocker) u.waypoint = null; // only the REAL destination clears the order
+      const arrived = moveToward(u, u.waypoint, u.speed * dt);
+      if (arrived) u.waypoint = null;
     }
 
     // 2. targeting + simultaneous damage resolution
@@ -243,3 +188,4 @@ class Battle {
 }
 
 module.exports = { Battle, distance, DEFAULT_DT };
+
