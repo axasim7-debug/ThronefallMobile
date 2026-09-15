@@ -1,0 +1,11 @@
+{
+  "name": "thronefall-balance-sim",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Deterministic 1v1 economy+combat simulator used to balance-test new cards (troops, heroes, buildings) before they ship.",
+  "main": "src/engine.js",
+  "scripts": {
+    "test": "node --test test/balance.test.js",
+    "sim": "node scripts/run-matchups.js"
+  }
+}
