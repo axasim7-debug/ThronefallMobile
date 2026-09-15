@@ -4,8 +4,13 @@
 // single build slot is free, and may start at most one action.
 const { startRepair } = require("./engine");
 
+// launch roster fields all 3 commanders (there's no "pick 1 of 3" — squads
+// of 3-4 are the point; see docs/GAME_DESIGN.md §3.3)
+const FULL_SQUAD = ["warlord", "guardian", "shadow"];
+
 const ECO = {
   name: "eco",
+  squad: FULL_SQUAD,
   decide(pl, content) {
     const { farm, barracks } = content.BUILDINGS;
     if (pl.farms.length < farm.maxCount && pl.gold >= farm.cost) {
@@ -19,6 +24,7 @@ const ECO = {
 
 const DEF = {
   name: "def",
+  squad: FULL_SQUAD,
   decide(pl, content, t) {
     const { wall, barracks } = content.BUILDINGS;
     // repairs only compete for the idle build slot once the initial
@@ -36,6 +42,7 @@ const DEF = {
 
 const ATK = {
   name: "atk",
+  squad: FULL_SQUAD,
   decide(pl, content) {
     const { barracks } = content.BUILDINGS;
     if (!pl.hasBarracks && pl.gold >= barracks.cost) {

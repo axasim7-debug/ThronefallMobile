@@ -33,7 +33,7 @@ function freshStructure(maxHp) {
   return { maxHp, damageTaken: 0, destroyed: false };
 }
 
-function initPlayer(strategy, content) {
+function initPlayer(strategy, content, squad) {
   return {
     strategy,
     gold: content.ECONOMY.startGold,
@@ -54,6 +54,7 @@ function initPlayer(strategy, content) {
     keep: freshStructure(content.DEFENSE.keep.hp),
     keepDestroyedAtT: null,
     _repairTarget: null,
+    commanders: (squad || []).map((key) => ({ key, rage: 0, casts: 0 })),
     stats: { diedAtWall: 0, stoppedAtTower: 0, reachedKeep: 0, towersLost: 0, repairsDone: 0, farmsRaided: 0 },
     barracksT: null,
     firstTroopT: null,
@@ -224,14 +225,87 @@ function advanceTroop(pl, content, t, onSpawn) {
   });
 }
 
+// weakest alive structure of a given kind ("tower"/"farm"), or null
+function weakestAlive(pl, kind, t, content) {
+  if (kind === "tower") {
+    const alive = pl.towers.filter((s) => !s.destroyed);
+    if (!alive.length) return null;
+    return alive.reduce((a, b) => (currentHP(a, t, content) <= currentHP(b, t, content) ? a : b));
+  }
+  if (kind === "farm") return pl.farms.find((f) => f.hp > 0) || null;
+  return null;
+}
+
+// AI policy: fire a commander's rage skill as soon as it's affordable (a
+// real player could choose to hold it instead — this is the AI baseline
+// for balance-testing, not the only viable play).
+//
+// Split into decide (mutates only `self`'s own rage — safe to do
+// immediately) and apply (touches cross-player state) so A and B's casts
+// within the same tick both read the PRE-tick board before either writes
+// to it. Doing damage+heal in one pass, self-then-opponent, created a real
+// bug: a mirror matchup (identical strategy vs itself) came out asymmetric,
+// because whichever side resolved first within a tick could see the
+// other's damage already applied (or not) depending on processing order.
+function decideCommanderCasts(self, opponent, content, t) {
+  const pending = [];
+  for (const cmd of self.commanders) {
+    cmd.rage = Math.min(content.RAGE.max, cmd.rage + content.RAGE.fillRatePerSec);
+    const def = content.COMMANDERS[cmd.key];
+    if (cmd.rage < def.rageCost) continue;
+    const targetsEnemy = def.rageEffect.target === "enemyFarm" || def.rageEffect.target === "enemyTower";
+    if (targetsEnemy && opponent.keepDestroyedAtT !== null) continue; // nothing left to hit — don't spend rage on a no-op
+    cmd.rage -= def.rageCost;
+    cmd.casts++;
+    pending.push({ self, opponent, eff: def.rageEffect });
+  }
+  return pending;
+}
+
+function applyCommanderCast({ self, opponent, eff }, content, t) {
+  if (eff.kind === "damageStructure") {
+    const targetPlayer = eff.target === "enemyFarm" || eff.target === "enemyTower" ? opponent : self;
+    if (eff.target === "enemyTower") {
+      const tower = weakestAlive(targetPlayer, "tower", t, content);
+      if (tower) damageStructure(tower, eff.amount, t, content);
+      if (targetPlayer.keep.destroyed && targetPlayer.keepDestroyedAtT === null) targetPlayer.keepDestroyedAtT = t;
+    } else if (eff.target === "enemyFarm") {
+      const farm = weakestAlive(targetPlayer, "farm", t, content);
+      if (farm) {
+        farm.hp = Math.max(0, farm.hp - eff.amount);
+        if (farm.hp === 0 && !farm.incomeRemoved) {
+          targetPlayer.income -= content.BUILDINGS.farm.incomeBonus;
+          const f = content.BUILDINGS.farm;
+          if (f.disruptionPenalty && f.disruptionSeconds) {
+            targetPlayer.disruptions.push({ amount: f.disruptionPenalty, until: t + f.disruptionSeconds });
+          }
+          farm.incomeRemoved = true;
+        }
+      }
+    }
+  } else if (eff.kind === "repairStructure") {
+    const wallDamaged = self.wallMaxHP > 0 && self.wallHP < self.wallMaxHP;
+    if (wallDamaged) {
+      self.wallHP = Math.min(self.wallMaxHP, self.wallHP + eff.amount);
+    } else {
+      const tower = self.towers.filter((s) => s.damageTaken > 0).sort((a, b) => b.damageTaken - a.damageTaken)[0];
+      if (tower) {
+        tower.damageTaken = Math.max(0, tower.damageTaken - eff.amount);
+        if (tower.destroyed && currentHP(tower, t, content) > 0) tower.destroyed = false;
+      }
+    }
+  }
+}
+
 /**
  * Simulate one 1v1 match. stratA/stratB are strategy modules (see
  * strategies.js) exposing a `decide(player, content)` that may start a build
- * action, and optionally `pickTroop(player, content)` (defaults to "infantry").
+ * action, and optionally `pickTroop(player, content)` (defaults to
+ * "infantry") and `squad` (commander keys fielded this match).
  */
 function simulate(stratA, stratB, content) {
-  const A = initPlayer(stratA.name, content);
-  const B = initPlayer(stratB.name, content);
+  const A = initPlayer(stratA.name, content, stratA.squad);
+  const B = initPlayer(stratB.name, content, stratB.squad);
   const arrivalsToA = new Map();
   const arrivalsToB = new Map();
   const duration = content.ECONOMY.duration;
@@ -257,6 +331,19 @@ function simulate(stratA, stratB, content) {
         advanceBuild(pl, content, t);
         advanceTroop(pl, content, t, (arrival) => queue(arrivals, arrival));
       }
+      // decide both sides' casts from the same pre-tick board, THEN apply
+      // both. Apply damage before heals (not grouped by player): applying
+      // one player's full set of casts before the other's let a same-tick
+      // heal "catch" damage the opponent just dealt for one side but not
+      // its mirror — confirmed with a mirror matchup (identical strategy
+      // vs itself) coming out asymmetric until casts were ordered by kind
+      // instead of by player.
+      const pendingCasts = [
+        ...(A.keepDestroyedAtT === null ? decideCommanderCasts(A, B, content, t) : []),
+        ...(B.keepDestroyedAtT === null ? decideCommanderCasts(B, A, content, t) : []),
+      ];
+      for (const cast of pendingCasts) if (cast.eff.kind === "damageStructure") applyCommanderCast(cast, content, t);
+      for (const cast of pendingCasts) if (cast.eff.kind !== "damageStructure") applyCommanderCast(cast, content, t);
     }
 
     if (A.keepDestroyedAtT === null) {

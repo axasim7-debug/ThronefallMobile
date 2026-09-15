@@ -29,6 +29,21 @@ function monoTroop(troopKey) {
   return Object.assign({}, ALL.atk, { name: `atk(${troopKey})`, pickTroop: () => troopKey });
 }
 
+// Caught a real bug during commander development: applying one player's
+// full set of same-tick effects before the other's let a same-tick heal
+// "catch" damage the opponent just dealt for one side but not its mirror,
+// so an identical-strategy-vs-itself match came out asymmetric. Any new
+// cross-player effect (a new commander skill, a troop ability that hits
+// back, etc.) is a candidate to reintroduce this — this test is the guard.
+test("sanity: a mirror matchup (identical strategy vs itself) is symmetric", () => {
+  for (const name of Object.keys(ALL)) {
+    const { A, B } = run(name, name);
+    assert.equal(A.keepDestroyedAtT, B.keepDestroyedAtT,
+      `${name} mirror: A died at ${A.keepDestroyedAtT}, B at ${B.keepDestroyedAtT} — should be identical`);
+    assert.equal(A.troopsProduced, B.troopsProduced, `${name} mirror: troop counts diverged`);
+  }
+});
+
 test("sanity: every strategy reaches its own barracks in a mirror match", () => {
   for (const name of Object.keys(ALL)) {
     const { A, B } = run(name, name);

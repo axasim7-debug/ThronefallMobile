@@ -92,4 +92,35 @@ const TROOPS = {
   },
 };
 
-module.exports = { ECONOMY, BUILDINGS, DEFENSE, REPAIR, TROOPS };
+// Commander rage economy: a 10-point bar per commander, filling at ONE
+// fixed rate — same for every commander, every player, F2P included. This
+// can NEVER be sped up by a purchase or an upgrade; that would translate
+// payment directly into "more skill casts," breaking the same match-time
+// fairness rule the whole economy design rests on (docs/GAME_DESIGN.md §4).
+// A commander fires its rage skill as soon as it can afford the cost
+// (AI policy for this test pass — a real player could hold for a bigger
+// window instead); cost is *subtracted*, not reset to 0, so the bar keeps
+// building from the remainder.
+const RAGE = { max: 10, fillRatePerSec: 10 / 90 }; // full bar from empty in 90s
+
+// Commander cards. Each has exactly ONE manually-triggered ability (the
+// rage skill) — the only skill players actively manage — plus 3 passive
+// skills that are not yet modeled numerically (first pass: prove the rage
+// economy itself doesn't break balance before layering passives on top;
+// see docs/PROGRESS.md). A launch squad fields all 3.
+const COMMANDERS = {
+  warlord: {
+    name: "القائد المدمّر — الهجمة الكاسحة",
+    rageCost: 6, rageEffect: { kind: "damageStructure", target: "enemyTower", amount: 320 },
+  },
+  guardian: {
+    name: "الحارسة — الدرع الحصين",
+    rageCost: 6, rageEffect: { kind: "repairStructure", target: "ownDamaged", amount: 260 },
+  },
+  shadow: {
+    name: "الظل — الغارة الخاطفة",
+    rageCost: 6, rageEffect: { kind: "damageStructure", target: "enemyFarm", amount: 200 },
+  },
+};
+
+module.exports = { ECONOMY, BUILDINGS, DEFENSE, REPAIR, TROOPS, RAGE, COMMANDERS };
