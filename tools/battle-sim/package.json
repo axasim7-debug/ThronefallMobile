@@ -1,0 +1,10 @@
+{
+  "name": "thronefall-battle-sim",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Prototype and stress-test for the continuous positional combat model (position, HP, DPS, range, player-directed movement — no auto-advance, no instant resolution) before any of it reaches the C# engine or the client. Separate from tools/balance-sim, which still owns the economy math.",
+  "main": "src/engine.js",
+  "scripts": {
+    "test": "node --test test/battle.test.js"
+  }
+}
