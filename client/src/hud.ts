@@ -8,20 +8,7 @@
 
 import type { Catalog, CommandKind, MatchState, SideView } from "./protocol";
 import { refusalText } from "./protocol";
-
-const BUILD_LABELS: Record<string, string> = {
-  farm: "مزرعة",
-  wall: "سور",
-  barracks: "ثكنة",
-};
-
-const BUILD_IN_PROGRESS_LABELS: Record<string, string> = {
-  farm: "بناء مزرعة",
-  wall: "بناء سور",
-  barracks: "بناء ثكنة",
-  repairWall: "ترميم السور",
-  repairTower: "ترميم برج",
-};
+import { buildingName, commanderName, troopName, BUILD_IN_PROGRESS_TEXT } from "./content-text";
 
 export type CommandSender = (kind: CommandKind, arg?: string) => void;
 
@@ -71,25 +58,25 @@ export class Hud {
         <div class="resource">
           <span class="coin"></span>
           <span class="gold-amount">—</span>
-          <span class="income">/ث —</span>
+          <span class="income">/s —</span>
         </div>
         <div class="clock">—:—</div>
       </div>
       <div class="keeps">
         <div class="keep-line you">
-          <span class="keep-label">قلعتك</span>
+          <span class="keep-label">You</span>
           <div class="hp-track"><div class="hp-fill you-fill"></div></div>
           <span class="keep-text">—</span>
           <span class="tower-pips you-pips"></span>
         </div>
         <div class="keep-line enemy">
-          <span class="keep-label">الخصم</span>
+          <span class="keep-label">Enemy</span>
           <div class="hp-track"><div class="hp-fill enemy-fill"></div></div>
           <span class="keep-text">—</span>
           <span class="tower-pips enemy-pips"></span>
         </div>
       </div>
-      <div class="status">في انتظار الاتصال…</div>
+      <div class="status">Connecting…</div>
     `;
     this.clock = this.top.querySelector(".clock")!;
     this.gold = this.top.querySelector(".gold-amount")!;
@@ -118,7 +105,9 @@ export class Hud {
 
   /**
    * The build/train buttons exist only once the server has told us what
-   * exists and what it costs — the client ships with no content list.
+   * exists and what it costs — the client ships with no content list, only
+   * the English display text for whatever keys the server names (see
+   * content-text.ts).
    */
   applyCatalog(catalog: Catalog) {
     this.catalog = catalog;
@@ -129,14 +118,12 @@ export class Hud {
     this.actions = [];
 
     for (const key of Object.keys(catalog.buildings)) {
-      builds.appendChild(this.makeAction("build", key, BUILD_LABELS[key] ?? key, catalog.buildings[key].cost));
+      builds.appendChild(this.makeAction("build", key, buildingName(key), catalog.buildings[key].cost));
     }
-    builds.appendChild(this.makeAction("repair", "", "ترميم", null));
+    builds.appendChild(this.makeAction("repair", "", "Repair", null));
 
     for (const [key, troop] of Object.entries(catalog.troops)) {
-      // the catalog name is "مشاة — درع ثقيل"; the button wants the short half
-      const short = troop.name.split("—")[0].trim();
-      troops.appendChild(this.makeAction("train", key, short, troop.cost));
+      troops.appendChild(this.makeAction("train", key, troopName(key), troop.cost));
     }
   }
 
@@ -161,9 +148,7 @@ export class Hud {
     this.clock.textContent = formatClock(Math.max(0, state.duration - state.tick));
     this.gold.textContent = String(you.gold);
     this.income.textContent =
-      you.incomePenalty > 0
-        ? `/ث ${you.income - you.incomePenalty}▼`
-        : `/ث ${you.income}`;
+      you.incomePenalty > 0 ? `/s ${you.income - you.incomePenalty}▼` : `/s ${you.income}`;
     this.income.classList.toggle("penalized", you.incomePenalty > 0);
 
     this.updateKeep(this.youBar, this.youKeepText, this.youTowers, you);
@@ -237,8 +222,7 @@ export class Hud {
         };
         this.commanderButtons.set(commander.key, entry);
       }
-      // the commander name is "القائد المدمّر — الهجمة الكاسحة"
-      entry.label.textContent = commander.name.split("—")[0].trim();
+      entry.label.textContent = commanderName(commander.key);
       const fraction = commander.rageCost > 0 ? commander.rage / commander.rageCost : 0;
       entry.fill.style.height = `${Math.min(1, fraction) * 100}%`;
       entry.el.disabled = !commander.ready;
@@ -275,13 +259,13 @@ export class Hud {
 function describeActivity(you: SideView): string {
   const parts: string[] = [];
   if (you.buildBusy) {
-    const label = BUILD_IN_PROGRESS_LABELS[you.buildBusy] ?? you.buildBusy;
-    parts.push(`${label} (${Math.ceil(you.buildTimer)}ث)`);
+    const label = BUILD_IN_PROGRESS_TEXT[you.buildBusy] ?? you.buildBusy;
+    parts.push(`${label} (${Math.ceil(you.buildTimer)}s)`);
   }
   if (you.troopBusy && you.troopKey) {
-    parts.push(`تدريب ${you.troopKey} (${Math.ceil(you.troopTimer)}ث)`);
+    parts.push(`Training ${troopName(you.troopKey)} (${Math.ceil(you.troopTimer)}s)`);
   }
-  if (parts.length === 0) return you.hasBarracks ? "جاهز" : "ابنِ ثكنة لتدريب الجنود";
+  if (parts.length === 0) return you.hasBarracks ? "Ready" : "Build a barracks to train troops";
   return parts.join(" · ");
 }
 

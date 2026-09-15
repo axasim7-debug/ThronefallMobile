@@ -47,7 +47,7 @@ const connection = new MatchConnection(url, {
   onStarted(message) {
     hud.applyCatalog(message.catalog);
     city.applyCatalog(message.catalog);
-    hud.setStatus(`المباراة بدأت — الخصم: ${message.opponent}`);
+    hud.setStatus(`Match started — opponent: ${message.opponent}`);
   },
 
   onState(state) {
@@ -65,27 +65,26 @@ const connection = new MatchConnection(url, {
 
   onEnded(message) {
     const tone = message.winner === "you" ? "win" : message.winner === "draw" ? "draw" : "lose";
-    const text =
-      message.winner === "you" ? "فزت!" : message.winner === "draw" ? "تعادل" : "خسرت";
+    const text = message.winner === "you" ? "Victory!" : message.winner === "draw" ? "Draw" : "Defeat";
     hud.showBanner(`${text} — ${describeTiebreak(message.tiebreak)}`, tone);
   },
 
   onError(message) {
-    hud.setStatus(`خطأ: ${message}`);
+    hud.setStatus(`Error: ${message}`);
   },
 
   onClosed() {
-    if (latest && !latest.finished) hud.showBanner("انقطع الاتصال بالخادم", "info");
+    if (latest && !latest.finished) hud.showBanner("Disconnected from server", "info");
   },
 });
 
 const TIEBREAK_TEXT: Record<string, string> = {
-  "keep-kill": "تدمير القلعة",
-  "towers-destroyed": "عدد الأبراج المدمَّرة",
-  "own-keep-hp-pct": "نسبة HP القلعة المتبقية",
-  "true-draw": "تعادل تام",
-  "mutual-destruction-timing": "توقيت التدمير المتبادل",
-  "mutual-destruction-same-tick": "تدمير متبادل في نفس اللحظة",
+  "keep-kill": "Keep destroyed",
+  "towers-destroyed": "Towers destroyed",
+  "own-keep-hp-pct": "Keep HP remaining",
+  "true-draw": "True draw",
+  "mutual-destruction-timing": "Mutual destruction timing",
+  "mutual-destruction-same-tick": "Mutual destruction, same tick",
 };
 
 function describeTiebreak(tiebreak: string): string {

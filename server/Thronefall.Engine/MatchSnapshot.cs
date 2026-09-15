@@ -12,7 +12,9 @@ public sealed record StructureView(double Hp, double MaxHp, bool Destroyed);
 
 public sealed record FarmView(double Hp, double MaxHp, bool IncomeRemoved);
 
-public sealed record CommanderView(string Key, string Name, double Rage, double RageCost, bool Ready, int Casts, bool Mastered);
+// No Name field — the key is the only identity the engine ships; the client
+// maps it to display text (see content-text.ts).
+public sealed record CommanderView(string Key, double Rage, double RageCost, bool Ready, int Casts, bool Mastered);
 
 public sealed record SideView(
     string Name,
@@ -100,7 +102,7 @@ public static class SnapshotBuilder
             Commanders: pl.Commanders.Select(c =>
             {
                 var def = Content.Commanders[c.Key];
-                return new CommanderView(c.Key, def.Name, Math.Round(c.Rage, 2), def.RageCost,
+                return new CommanderView(c.Key, Math.Round(c.Rage, 2), def.RageCost,
                     c.Rage >= def.RageCost, c.Casts, c.IsMastered());
             }).ToList(),
             TowersLost: pl.Stats.TowersLost,
@@ -120,12 +122,14 @@ public static class SnapshotBuilder
             wall = new { cost = Content.Buildings.Wall.Cost, buildTime = Content.Buildings.Wall.BuildTime, maxSegments = Content.Buildings.Wall.MaxSegments, hpPerSegment = Content.Buildings.Wall.HpPerSegment },
             barracks = new { cost = Content.Buildings.Barracks.Cost, buildTime = Content.Buildings.Barracks.BuildTime },
         },
+        // No display names here — the client maps these same keys to English
+        // text (and, later, any other language) via content-text.ts.
         troops = Content.Troops.ToDictionary(
             kv => kv.Key,
-            kv => (object)new { name = kv.Value.Name, cost = kv.Value.Cost, buildTime = kv.Value.BuildTime, marchTime = kv.Value.MarchTime }),
+            kv => (object)new { cost = kv.Value.Cost, buildTime = kv.Value.BuildTime, marchTime = kv.Value.MarchTime }),
         commanders = Content.Commanders.ToDictionary(
             kv => kv.Key,
-            kv => (object)new { name = kv.Value.Name, rageCost = kv.Value.RageCost }),
+            kv => (object)new { rageCost = kv.Value.RageCost }),
         rage = new { max = Content.Rage.Max, fillRatePerSec = Content.Rage.FillRatePerSec },
     };
 }

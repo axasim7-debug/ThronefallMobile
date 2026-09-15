@@ -100,7 +100,7 @@ if (opening.clock === "—:—") fail("no state frame arrived");
 // check fail against a server that was behaving correctly.
 const tampered = await page.evaluate(() => {
   const repair = [...document.querySelectorAll(".builds .action")].find(
-    (b) => b.querySelector(".action-label")?.textContent === "ترميم",
+    (b) => b.querySelector(".action-label")?.textContent === "Repair",
   );
   if (!repair) return false;
   repair.disabled = false;
@@ -141,8 +141,8 @@ let casts = 0;
 let midShot = false;
 for (let i = 0; i < 200; i++) {
   if (await page.evaluate(() => document.querySelector(".banner")?.hidden === false)) break;
-  await press(".builds", "ثكنة");
-  if (await press(".troops", "فرسان")) trained += 1;
+  await press(".builds", "Barracks");
+  if (await press(".troops", "Cavalry")) trained += 1;
   casts += await page.evaluate(() => {
     const ready = [...document.querySelectorAll(".commander.ready")];
     ready.forEach((c) => c.click());

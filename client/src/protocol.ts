@@ -19,7 +19,6 @@ export interface FarmView {
 
 export interface CommanderView {
   key: string;
-  name: string;
   rage: number;
   rageCost: number;
   /** server's verdict on whether the rage skill can fire right now */
@@ -71,7 +70,6 @@ export interface BuildingCatalogEntry {
 }
 
 export interface TroopCatalogEntry {
-  name: string;
   cost: number;
   buildTime: number;
   marchTime: number;
@@ -80,7 +78,7 @@ export interface TroopCatalogEntry {
 export interface Catalog {
   buildings: Record<string, BuildingCatalogEntry>;
   troops: Record<string, TroopCatalogEntry>;
-  commanders: Record<string, { name: string; rageCost: number }>;
+  commanders: Record<string, { rageCost: number }>;
   rage: { max: number; fillRatePerSec: number };
 }
 
@@ -192,19 +190,19 @@ export class MatchConnection {
  * null-omission bug hid (see docs/PROGRESS.md).
  */
 const REFUSAL_TEXT: Record<string, string> = {
-  "not-enough-gold": "ذهب غير كافٍ",
-  "build-slot-busy": "خانة البناء مشغولة",
-  "training-slot-busy": "الثكنة مشغولة",
-  "no-barracks": "تحتاج ثكنة أولاً",
-  "farm-limit-reached": "وصلت للحد الأقصى من المزارع",
-  "wall-already-complete": "السور مكتمل",
-  "barracks-already-built": "الثكنة مبنية بالفعل",
-  "unknown-troop": "جندي غير معروف",
-  "unknown-building": "مبنى غير معروف",
-  "rage-not-charged": "شريط الغضب لم يمتلئ",
-  "commander-not-in-squad": "القائد ليس في تشكيلتك",
-  "nothing-to-repair-or-not-enough-gold": "لا يوجد ما يُرمَّم (أو ذهب غير كافٍ)",
+  "not-enough-gold": "Not enough gold",
+  "build-slot-busy": "Build queue is busy",
+  "training-slot-busy": "Barracks is busy",
+  "no-barracks": "You need a barracks first",
+  "farm-limit-reached": "Farm limit reached",
+  "wall-already-complete": "Wall is already complete",
+  "barracks-already-built": "Barracks already built",
+  "unknown-troop": "Unknown troop",
+  "unknown-building": "Unknown building",
+  "rage-not-charged": "Rage isn't charged yet",
+  "commander-not-in-squad": "That commander isn't in your squad",
+  "nothing-to-repair-or-not-enough-gold": "Nothing to repair (or not enough gold)",
 };
 
 export const refusalText = (reason: string | null): string =>
-  reason === null ? "مرفوض" : REFUSAL_TEXT[reason] ?? reason;
+  reason === null ? "Rejected" : REFUSAL_TEXT[reason] ?? reason;
