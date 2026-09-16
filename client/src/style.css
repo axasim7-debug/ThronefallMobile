@@ -376,3 +376,309 @@ body {
 .banner.info {
   background: linear-gradient(180deg, #9fb0cc, var(--g-stone-d));
 }
+
+.banner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.banner-menu {
+  border: 2.5px solid var(--g-navy-d);
+  border-radius: 999px;
+  padding: 6px 18px;
+  background: linear-gradient(180deg, #fff, #dfe6f2);
+  color: var(--g-navy-d);
+  font-family: "Lilita One", system-ui, -apple-system, sans-serif;
+  font-size: 13px;
+  cursor: pointer;
+  box-shadow: 0 3px 0 rgba(0, 0, 0, 0.25);
+}
+
+.banner-menu:active {
+  transform: translateY(2px);
+  box-shadow: none;
+}
+
+/* ---------------------------------------------------------------------------
+   Splash / Lobby / Matchmaking — the meta-flow around the battle screen
+   itself. Structure only for now (docs/UI_UX_IDENTITY.md §10): flat colors
+   and shapes standing in for illustrated backgrounds/card art/icons that
+   still need to be generated. Same font, same navy/gold palette, same
+   beveled-button vocabulary as the battle HUD above, so nothing here reads
+   as a different app once real art lands on top of it.
+   --------------------------------------------------------------------------- */
+
+#splash,
+#lobby,
+#matchmaking {
+  position: absolute;
+  inset: 0;
+}
+
+/* the [hidden] attribute must still win over this flex display, or a
+   "hidden" screen keeps intercepting pointer events underneath the one
+   that's actually showing (an ID selector otherwise beats [hidden] alone) */
+#splash:not([hidden]),
+#lobby:not([hidden]),
+#matchmaking:not([hidden]) {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  background: var(--g-navy-d);
+  color: #fff;
+  font-family: "Lilita One", system-ui, -apple-system, sans-serif;
+  padding: calc(var(--safe-top) + 16px) calc(var(--safe-right) + 16px) calc(var(--safe-bottom) + 16px)
+    calc(var(--safe-left) + 16px);
+}
+
+/* ---- splash ---- */
+
+#splash {
+  justify-content: center;
+  gap: 28px;
+  background: radial-gradient(circle at 50% 35%, #22345a, var(--g-navy-d) 75%);
+}
+
+.splash-title {
+  font-size: 44px;
+  letter-spacing: 0.04em;
+  color: var(--g-gold);
+  text-shadow:
+    0 3px 0 var(--g-gold-d),
+    0 6px 14px rgba(0, 0, 0, 0.5);
+}
+
+.splash-bar {
+  width: 70%;
+  max-width: 320px;
+  height: 14px;
+  border: 2.5px solid var(--g-navy-d);
+  border-radius: 999px;
+  background: #22304a;
+  overflow: hidden;
+}
+
+.splash-bar-fill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(180deg, #ffd45e, var(--g-gold));
+  animation: splash-fill 1.3s ease-out forwards;
+}
+
+@keyframes splash-fill {
+  to {
+    width: 100%;
+  }
+}
+
+/* ---- lobby ---- */
+
+#lobby {
+  justify-content: flex-start;
+}
+
+.lobby-top {
+  width: 100%;
+  display: flex;
+  gap: 10px;
+}
+
+.resource.gem .gem-icon {
+  width: 18px;
+  height: 18px;
+  flex: none;
+  background: linear-gradient(180deg, #b6f2c9, var(--g-green));
+  clip-path: polygon(50% 0%, 100% 38%, 82% 100%, 18% 100%, 0% 38%);
+}
+
+.lobby-content {
+  flex: 1;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  overflow: auto;
+}
+
+.lobby-placeholder {
+  color: #93a0b5;
+  font-size: 16px;
+}
+
+.lobby-chests {
+  display: flex;
+  gap: 10px;
+}
+
+.chest {
+  width: 54px;
+  height: 54px;
+  border: 3px solid var(--g-navy-d);
+  border-radius: 10px;
+  background: linear-gradient(180deg, #b98a4a, #8a5f28);
+  box-shadow: 0 4px 0 #5c3d18, inset 0 2px 0 rgba(255, 255, 255, 0.25);
+}
+
+.card-grid {
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  padding: 4px;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 4px 10px;
+  border: 3px solid var(--g-navy-d);
+  border-radius: 10px;
+  background: linear-gradient(180deg, #4f83c9, var(--g-blue));
+  box-shadow: 0 4px 0 var(--g-blue-d);
+  text-align: center;
+}
+
+.card-art {
+  width: 100%;
+  aspect-ratio: 1;
+  border-radius: 6px;
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.25), rgba(255, 255, 255, 0));
+}
+
+.card-name {
+  font-size: 12px;
+}
+
+.card-blurb {
+  font-size: 9px;
+  color: #dbe6ff;
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+.lobby-cta {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+}
+
+.cta-side {
+  width: 48px;
+  height: 48px;
+  flex: none;
+  border: 3px solid var(--g-navy-d);
+  border-radius: 12px;
+  background: linear-gradient(180deg, #4f83c9, var(--g-blue));
+  box-shadow: 0 4px 0 var(--g-blue-d);
+  cursor: pointer;
+}
+
+.cta-side-icon {
+  display: block;
+  width: 20px;
+  height: 20px;
+  margin: 0 auto;
+  background: rgba(255, 255, 255, 0.85);
+}
+
+.cta-side-icon.cards-icon {
+  clip-path: polygon(20% 0, 100% 0, 100% 80%, 80% 100%, 0 100%, 0 20%);
+}
+
+.cta-side-icon.trophy-icon {
+  clip-path: polygon(30% 0%, 70% 0%, 70% 55%, 100% 55%, 50% 100%, 0% 55%, 30% 55%);
+}
+
+.cta-battle {
+  flex: 1;
+  min-height: 54px;
+  border: 3px solid var(--g-navy-d);
+  border-radius: 14px;
+  background: linear-gradient(180deg, #ffd45e, var(--g-gold));
+  box-shadow: 0 5px 0 var(--g-gold-d), 0 7px 12px rgba(0, 0, 0, 0.4);
+  color: var(--g-navy-d);
+  font-family: "Lilita One", system-ui, -apple-system, sans-serif;
+  font-size: 22px;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+}
+
+.cta-battle:active {
+  transform: translateY(4px);
+  box-shadow: 0 1px 0 var(--g-gold-d);
+}
+
+.tab-bar {
+  width: 100%;
+  display: flex;
+  border-top: 2px solid #22304a;
+  padding-top: 8px;
+}
+
+.tab {
+  flex: 1;
+  padding: 6px 2px;
+  background: none;
+  border: none;
+  color: #93a0b5;
+  font-family: "Lilita One", system-ui, -apple-system, sans-serif;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.tab.active {
+  color: var(--g-gold);
+}
+
+/* ---- matchmaking ---- */
+
+#matchmaking {
+  justify-content: center;
+  gap: 22px;
+  text-align: center;
+}
+
+.mm-title {
+  font-size: 22px;
+  color: var(--g-gold);
+}
+
+.mm-spinner {
+  width: 40px;
+  height: 40px;
+  border: 5px solid #22304a;
+  border-top-color: var(--g-gold);
+  border-radius: 50%;
+  animation: mm-spin 0.9s linear infinite;
+}
+
+@keyframes mm-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.mm-cancel {
+  border: 2.5px solid var(--g-navy-d);
+  border-radius: 999px;
+  padding: 8px 26px;
+  background: linear-gradient(180deg, #f4705f, var(--g-red));
+  box-shadow: 0 3px 0 var(--g-red-d);
+  color: #fff;
+  font-family: "Lilita One", system-ui, -apple-system, sans-serif;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.mm-tip {
+  max-width: 320px;
+  font-size: 12px;
+  color: #c3cbdb;
+  font-family: system-ui, -apple-system, sans-serif;
+}

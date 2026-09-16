@@ -41,13 +41,14 @@ export class Hud {
   private status!: HTMLElement;
   private toast!: HTMLElement;
   private banner!: HTMLElement;
+  private bannerText!: HTMLElement;
 
   private actions: ActionButton[] = [];
 
   private catalog: Catalog | null = null;
   private toastTimer: number | undefined;
 
-  constructor(private send: CommandSender) {
+  constructor(private send: CommandSender, private onReturnToMenu: () => void) {
     this.top = document.querySelector<HTMLElement>("#hud-top")!;
     this.bottom = document.querySelector<HTMLElement>("#hud-bottom")!;
     this.buildTop();
@@ -97,12 +98,17 @@ export class Hud {
   private buildBottom() {
     this.bottom.innerHTML = `
       <div class="toast" hidden></div>
-      <div class="banner" hidden></div>
+      <div class="banner" hidden>
+        <div class="banner-text"></div>
+        <button class="banner-menu" type="button">Back to Menu</button>
+      </div>
       <div class="row builds"></div>
       <div class="row troops"></div>
     `;
     this.toast = this.bottom.querySelector(".toast")!;
     this.banner = this.bottom.querySelector(".banner")!;
+    this.bannerText = this.bottom.querySelector(".banner-text")!;
+    this.bottom.querySelector(".banner-menu")!.addEventListener("click", () => this.onReturnToMenu());
   }
 
   /**
@@ -239,10 +245,19 @@ export class Hud {
   }
 
   showBanner(text: string, tone: "win" | "lose" | "draw" | "info") {
-    this.banner.textContent = text;
+    this.bannerText.textContent = text;
     this.banner.className = `banner ${tone}`;
     this.banner.hidden = false;
     for (const action of this.actions) action.el.disabled = true;
+  }
+
+  /** Called when returning to the lobby after a match — clears this match's
+   * leftover UI state so the next one doesn't open on a stale banner/toast. */
+  reset() {
+    this.banner.hidden = true;
+    this.toast.hidden = true;
+    window.clearTimeout(this.toastTimer);
+    this.status.textContent = "Connecting…";
   }
 }
 

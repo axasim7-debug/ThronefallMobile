@@ -121,7 +121,14 @@ await page.addInitScript(() => {
   for (const key of ["CONNECTING", "OPEN", "CLOSING", "CLOSED"]) window.WebSocket[key] = Native[key];
 });
 await page.goto(`${base}/?opponent=${opponent}&speed=${speed}`, { waitUntil: "networkidle" });
-await page.waitForTimeout(600);
+
+// The app now opens on a splash -> lobby screen (docs/UI_UX_IDENTITY.md §10)
+// instead of connecting immediately — walk through it like a real player:
+// wait for the splash's fixed beat, press Battle, then the fixed
+// "searching for opponent" beat before the match actually connects.
+await page.waitForTimeout(1500);
+await page.click(".cta-battle");
+await page.waitForTimeout(1100);
 
 // the client ships with no content list — every button here came from the
 // server's catalog, so an empty row means the handshake silently failed

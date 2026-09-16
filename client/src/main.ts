@@ -3,14 +3,26 @@ import { buildCityScene } from "./scene";
 import { Hud } from "./hud";
 import { MatchConnection } from "./protocol";
 import type { CommandKind, MatchState } from "./protocol";
+import { Lobby } from "./lobby";
+import { Matchmaking } from "./matchmaking";
 
+// --- screen containers ------------------------------------------------------
+// Splash -> Lobby -> Matchmaking -> Battle (#app) -> victory banner's "Back to
+// Menu" -> Lobby again. See docs/UI_UX_IDENTITY.md §1/§10 for the flow this
+// mirrors and what's still structure-only (Cards/Shop/Clan/Ranking tabs).
+
+const splash = document.querySelector<HTMLElement>("#splash")!;
+const appEl = document.querySelector<HTMLElement>("#app")!;
 const canvas = document.querySelector<HTMLCanvasElement>("#scene");
 if (!canvas) throw new Error("missing #scene canvas");
 
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // cap for mobile GPU cost
 
-const city = buildCityScene();
+// `city` is rebuilt fresh per match (buildCityScene() is cheap — a handful of
+// primitives) rather than reused, so a second match never inherits meshes
+// left over from the first — simpler than teaching scene.ts to reset itself.
+let city = buildCityScene();
 
 function resize() {
   const { clientWidth: width, clientHeight: height } = canvas!;
@@ -19,68 +31,117 @@ function resize() {
 }
 window.addEventListener("resize", resize);
 window.addEventListener("orientationchange", resize);
-resize();
 
+let rafHandle: number | null = null;
 let lastFrameTime = performance.now();
 function frame() {
   const now = performance.now();
   city.tick(Math.min(0.25, (now - lastFrameTime) / 1000));
   lastFrameTime = now;
   renderer.render(city.scene, city.camera);
-  requestAnimationFrame(frame);
+  rafHandle = requestAnimationFrame(frame);
 }
-frame();
+function startRendering() {
+  resize();
+  lastFrameTime = performance.now();
+  if (rafHandle === null) frame();
+}
+function stopRendering() {
+  if (rafHandle !== null) cancelAnimationFrame(rafHandle);
+  rafHandle = null;
+}
 
-// --- connect to the authoritative server ---------------------------------
-// Vite proxies /ws to the .NET server in dev (see vite.config.ts), so this is
-// same-origin and works unchanged when the client is served by the server
-// itself in production.
+// --- splash -----------------------------------------------------------------
+// docs/UI_UX_IDENTITY.md §1: keep it under ~3s and don't block on anything —
+// there's nothing to load yet, so this is a fixed, short beat, not a real
+// asset-loading gate.
+window.setTimeout(() => {
+  splash.hidden = true;
+  lobby.show();
+}, 1400);
 
-const params = new URLSearchParams(location.search);
-const opponent = params.get("opponent") ?? "atk";
-const speed = params.get("speed") ?? "1";
-const scheme = location.protocol === "https:" ? "wss" : "ws";
-const url = `${scheme}://${location.host}/ws/match?opponent=${encodeURIComponent(opponent)}&speed=${encodeURIComponent(speed)}`;
+// --- match orchestration -----------------------------------------------------
 
+let connection: MatchConnection | null = null;
 let latest: MatchState | null = null;
 
-const send = (kind: CommandKind, arg = "", x?: number, z?: number) => connection.send(kind, arg, x, z);
-const hud = new Hud(send);
+const send = (kind: CommandKind, arg = "", x?: number, z?: number) => connection?.send(kind, arg, x, z);
+const hud = new Hud(send, returnToMenu);
 
-const connection = new MatchConnection(url, {
-  onStarted(message) {
-    hud.applyCatalog(message.catalog);
-    city.setCatalog(message.catalog);
-    hud.setStatus(`Match started — opponent: ${message.opponent}`);
-  },
-
-  onState(state) {
-    latest = state;
-    hud.update(state);
-    city.update(state);
-  },
-
-  onAck(ack) {
-    // An accepted command needs no announcement: the next state frame shows
-    // it. Only a refusal needs explaining, or the player is left guessing why
-    // their tap did nothing.
-    if (!ack.accepted) hud.showRefusal(ack.reason);
-  },
-
-  onEnded(message) {
-    const tone = message.winner === "you" ? "win" : message.winner === "draw" ? "draw" : "lose";
-    const text = message.winner === "you" ? "Victory!" : message.winner === "draw" ? "Draw" : "Defeat";
-    hud.showBanner(`${text} — ${describeTiebreak(message.tiebreak)}`, tone);
-  },
-
-  onError(message) {
-    hud.setStatus(`Error: ${message}`);
-  },
-
-  onClosed() {
-    if (latest && !latest.finished) hud.showBanner("Disconnected from server", "info");
-  },
+const matchmaking = new Matchmaking(() => {
+  matchmaking.hide();
+  lobby.show();
 });
+
+const lobby = new Lobby(() => {
+  lobby.hide();
+  matchmaking.show();
+  // Real matchmaking is a stub — a bot opponent is always available, so this
+  // is a fixed beat for the "searching" screen to be visible at all, not an
+  // actual queue wait.
+  window.setTimeout(startMatch, 900);
+});
+
+function startMatch() {
+  matchmaking.hide();
+  city = buildCityScene();
+  appEl.hidden = false;
+  startRendering();
+  connectToServer();
+}
+
+function returnToMenu() {
+  connection?.close();
+  connection = null;
+  latest = null;
+  stopRendering();
+  appEl.hidden = true;
+  hud.reset();
+  lobby.show();
+}
+
+function connectToServer() {
+  const params = new URLSearchParams(location.search);
+  const opponent = params.get("opponent") ?? "atk";
+  const speed = params.get("speed") ?? "1";
+  const scheme = location.protocol === "https:" ? "wss" : "ws";
+  const url = `${scheme}://${location.host}/ws/match?opponent=${encodeURIComponent(opponent)}&speed=${encodeURIComponent(speed)}`;
+
+  connection = new MatchConnection(url, {
+    onStarted(message) {
+      hud.applyCatalog(message.catalog);
+      city.setCatalog(message.catalog);
+      hud.setStatus(`Match started — opponent: ${message.opponent}`);
+    },
+
+    onState(state) {
+      latest = state;
+      hud.update(state);
+      city.update(state);
+    },
+
+    onAck(ack) {
+      // An accepted command needs no announcement: the next state frame shows
+      // it. Only a refusal needs explaining, or the player is left guessing why
+      // their tap did nothing.
+      if (!ack.accepted) hud.showRefusal(ack.reason);
+    },
+
+    onEnded(message) {
+      const tone = message.winner === "you" ? "win" : message.winner === "draw" ? "draw" : "lose";
+      const text = message.winner === "you" ? "Victory!" : message.winner === "draw" ? "Draw" : "Defeat";
+      hud.showBanner(`${text} — ${describeTiebreak(message.tiebreak)}`, tone);
+    },
+
+    onError(message) {
+      hud.setStatus(`Error: ${message}`);
+    },
+
+    onClosed() {
+      if (latest && !latest.finished) hud.showBanner("Disconnected from server", "info");
+    },
+  });
+}
 
 const TIEBREAK_TEXT: Record<string, string> = {
   "keep-kill": "Keep destroyed",
