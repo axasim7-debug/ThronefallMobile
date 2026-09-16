@@ -19,17 +19,6 @@ export const TROOP_TEXT: Record<string, TroopText> = {
   engineer: { name: "Siege Engineer", blurb: "Wrecks defenses" },
 };
 
-export interface CommanderText {
-  name: string;
-  rageSkill: string;
-}
-
-export const COMMANDER_TEXT: Record<string, CommanderText> = {
-  warlord: { name: "Warlord", rageSkill: "Sweeping Strike" },
-  guardian: { name: "Guardian", rageSkill: "Bulwark" },
-  shadow: { name: "Shadow", rageSkill: "Swift Raid" },
-};
-
 export const BUILDING_TEXT: Record<string, string> = {
   farm: "Farm",
   barracks: "Barracks",
@@ -42,5 +31,4 @@ export const BUILD_IN_PROGRESS_TEXT: Record<string, string> = {
 };
 
 export const troopName = (key: string): string => TROOP_TEXT[key]?.name ?? key;
-export const commanderName = (key: string): string => COMMANDER_TEXT[key]?.name ?? key;
 export const buildingName = (key: string): string => BUILDING_TEXT[key] ?? key;

@@ -5,12 +5,17 @@
 // *presentation*, using the catalog the server sent at match start. It is not
 // a permission check: pressing anything still goes to the server, which
 // re-validates and can refuse. See docs/GAME_DESIGN.md §5.2.
+//
+// No commander/rage row here — server/Thronefall.PositionalEngine doesn't
+// have that system (yet — see docs/PROGRESS.md's open items). Unit
+// positioning (build/train's payoff) happens by dragging directly on the
+// battlefield, wired in main.ts, not through a HUD button.
 
 import type { Catalog, CommandKind, MatchState, SideView } from "./protocol";
 import { refusalText } from "./protocol";
-import { buildingName, commanderName, troopName, BUILD_IN_PROGRESS_TEXT } from "./content-text";
+import { buildingName, troopName, BUILD_IN_PROGRESS_TEXT } from "./content-text";
 
-export type CommandSender = (kind: CommandKind, arg?: string) => void;
+export type CommandSender = (kind: CommandKind, arg?: string, x?: number, z?: number) => void;
 
 interface ActionButton {
   el: HTMLButtonElement;
@@ -37,8 +42,6 @@ export class Hud {
   private banner!: HTMLElement;
 
   private actions: ActionButton[] = [];
-  private commanderRow!: HTMLElement;
-  private commanderButtons = new Map<string, { el: HTMLButtonElement; fill: HTMLElement; label: HTMLElement }>();
 
   private catalog: Catalog | null = null;
   private toastTimer: number | undefined;
@@ -94,13 +97,11 @@ export class Hud {
     this.bottom.innerHTML = `
       <div class="toast" hidden></div>
       <div class="banner" hidden></div>
-      <div class="row commanders"></div>
       <div class="row builds"></div>
       <div class="row troops"></div>
     `;
     this.toast = this.bottom.querySelector(".toast")!;
     this.banner = this.bottom.querySelector(".banner")!;
-    this.commanderRow = this.bottom.querySelector(".commanders")!;
   }
 
   /**
@@ -147,29 +148,30 @@ export class Hud {
 
     this.clock.textContent = formatClock(Math.max(0, state.duration - state.tick));
     this.gold.textContent = String(you.gold);
-    this.income.textContent =
-      you.incomePenalty > 0 ? `/s ${you.income - you.incomePenalty}▼` : `/s ${you.income}`;
-    this.income.classList.toggle("penalized", you.incomePenalty > 0);
+    this.income.textContent = `/s ${you.income}`;
 
     this.updateKeep(this.youBar, this.youKeepText, this.youTowers, you);
     this.updateKeep(this.enemyBar, this.enemyKeepText, this.enemyTowers, state.enemy);
 
     this.status.textContent = describeActivity(you);
     this.updateActions(you);
-    this.updateCommanders(you);
   }
 
   private updateKeep(bar: HTMLElement, text: HTMLElement, pips: HTMLElement, side: SideView) {
+    const keep = side.structures.find((s) => s.key === "keep");
+    const towers = side.structures.filter((s) => s.key === "tower");
+    if (!keep) return;
+
     // maxHp already accounts for the reinforcement ramp, server-side
-    const fraction = side.keep.maxHp > 0 ? side.keep.hp / side.keep.maxHp : 0;
+    const fraction = keep.maxHp > 0 ? keep.hp / keep.maxHp : 0;
     bar.style.width = `${Math.max(0, Math.min(1, fraction)) * 100}%`;
     bar.classList.toggle("critical", fraction < 0.25);
-    text.textContent = `${side.keep.hp}`;
+    text.textContent = `${keep.hp}`;
 
-    if (pips.childElementCount !== side.towers.length) {
-      pips.innerHTML = side.towers.map(() => `<i class="pip"></i>`).join("");
+    if (pips.childElementCount !== towers.length) {
+      pips.innerHTML = towers.map(() => `<i class="pip"></i>`).join("");
     }
-    side.towers.forEach((tower, i) => {
+    towers.forEach((tower, i) => {
       pips.children[i].classList.toggle("down", tower.destroyed);
     });
   }
@@ -182,7 +184,7 @@ export class Hud {
       if (action.kind === "build") {
         const entry = this.catalog.buildings[action.arg];
         disabled = you.buildBusy !== null || you.gold < entry.cost;
-        if (action.arg === "farm" && you.farms.length >= (entry.maxCount ?? Infinity)) disabled = true;
+        if (action.arg === "farm" && you.farms >= (entry.maxCount ?? Infinity)) disabled = true;
         if (action.arg === "barracks" && you.hasBarracks) disabled = true;
       } else if (action.kind === "train") {
         const entry = this.catalog.troops[action.arg];
@@ -199,32 +201,6 @@ export class Hud {
             : this.catalog.troops[action.arg]?.cost;
         action.priceEl.classList.toggle("unaffordable", price !== undefined && you.gold < price);
       }
-    }
-  }
-
-  private updateCommanders(you: SideView) {
-    for (const commander of you.commanders) {
-      let entry = this.commanderButtons.get(commander.key);
-      if (!entry) {
-        const button = document.createElement("button");
-        button.className = "commander";
-        button.type = "button";
-        button.innerHTML = `<span class="rage-fill"></span><span class="commander-label"></span>`;
-        button.addEventListener("click", () => this.send("castRage", commander.key));
-        this.commanderRow.appendChild(button);
-        entry = {
-          el: button,
-          fill: button.querySelector(".rage-fill")!,
-          label: button.querySelector(".commander-label")!,
-        };
-        this.commanderButtons.set(commander.key, entry);
-      }
-      entry.label.textContent = commanderName(commander.key);
-      const fraction = commander.rageCost > 0 ? commander.rage / commander.rageCost : 0;
-      entry.fill.style.height = `${Math.min(1, fraction) * 100}%`;
-      entry.el.disabled = !commander.ready;
-      entry.el.classList.toggle("ready", commander.ready);
-      entry.el.classList.toggle("mastered", commander.mastered);
     }
   }
 
@@ -249,7 +225,6 @@ export class Hud {
     this.banner.className = `banner ${tone}`;
     this.banner.hidden = false;
     for (const action of this.actions) action.el.disabled = true;
-    for (const entry of this.commanderButtons.values()) entry.el.disabled = true;
   }
 }
 
@@ -262,7 +237,7 @@ function describeActivity(you: SideView): string {
   if (you.troopBusy && you.troopKey) {
     parts.push(`Training ${troopName(you.troopKey)} (${Math.ceil(you.troopTimer)}s)`);
   }
-  if (parts.length === 0) return you.hasBarracks ? "Ready" : "Build a barracks to train troops";
+  if (parts.length === 0) return you.hasBarracks ? "Drag units on the field to move them" : "Build a barracks to train troops";
   return parts.join(" · ");
 }
 

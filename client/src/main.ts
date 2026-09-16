@@ -21,7 +21,11 @@ window.addEventListener("resize", resize);
 window.addEventListener("orientationchange", resize);
 resize();
 
+let lastFrameTime = performance.now();
 function frame() {
+  const now = performance.now();
+  city.tick(Math.min(0.25, (now - lastFrameTime) / 1000));
+  lastFrameTime = now;
   renderer.render(city.scene, city.camera);
   requestAnimationFrame(frame);
 }
@@ -40,7 +44,7 @@ const url = `${scheme}://${location.host}/ws/match?opponent=${encodeURIComponent
 
 let latest: MatchState | null = null;
 
-const send = (kind: CommandKind, arg = "") => connection.send(kind, arg);
+const send = (kind: CommandKind, arg = "", x?: number, z?: number) => connection.send(kind, arg, x, z);
 const hud = new Hud(send);
 
 const connection = new MatchConnection(url, {
@@ -89,3 +93,65 @@ const TIEBREAK_TEXT: Record<string, string> = {
 function describeTiebreak(tiebreak: string): string {
   return TIEBREAK_TEXT[tiebreak] ?? tiebreak;
 }
+
+// --- drag-to-move: the entire "control scheme" -----------------------------
+// Press on one of your own units, drag, release on a spot on the field — the
+// server gets one moveUnit(id, x, z) command. No camera drag, no other
+// gesture; docs/GAME_DESIGN.md §2 calls for exactly this, one-thumb control.
+
+function pointerToNdc(event: PointerEvent): { x: number; y: number } {
+  const rect = canvas!.getBoundingClientRect();
+  return {
+    x: ((event.clientX - rect.left) / rect.width) * 2 - 1,
+    y: -((event.clientY - rect.top) / rect.height) * 2 + 1,
+  };
+}
+
+let draggingUnitId: string | null = null;
+
+canvas.addEventListener("pointerdown", (event) => {
+  if (!latest || latest.finished) return;
+  const ndc = pointerToNdc(event);
+  const unitId = city.pickOwnUnitAt(ndc.x, ndc.y);
+  if (!unitId) return;
+  draggingUnitId = unitId;
+  canvas.setPointerCapture(event.pointerId);
+  city.setSelected(unitId);
+  city.setDragGhost(city.groundPointAt(ndc.x, ndc.y));
+});
+
+canvas.addEventListener("pointermove", (event) => {
+  if (!draggingUnitId) return;
+  const ndc = pointerToNdc(event);
+  city.setDragGhost(city.groundPointAt(ndc.x, ndc.y));
+});
+
+function endDrag(event: PointerEvent) {
+  if (!draggingUnitId) return;
+  const ndc = pointerToNdc(event);
+  const point = city.groundPointAt(ndc.x, ndc.y);
+  send("moveUnit", draggingUnitId, point.x, point.z);
+  draggingUnitId = null;
+  city.setSelected(null);
+  city.setDragGhost(null);
+}
+
+canvas.addEventListener("pointerup", endDrag);
+canvas.addEventListener("pointercancel", endDrag);
+
+// e2e-only hook (client/e2e/smoke.mjs): projects a world (x, z) to screen
+// coordinates so a test can compute where to perform a real drag gesture,
+// without duplicating the camera/projection math. Mirrors the existing
+// window.__thronefallSocket capture — a small, clearly-scoped test seam, not
+// a general debug API.
+(window as unknown as { __thronefallProject: (x: number, z: number) => { x: number; y: number } }).__thronefallProject = (
+  x: number,
+  z: number,
+) => {
+  const vector = new THREE.Vector3(x, 0.5, z).project(city.camera);
+  const rect = canvas!.getBoundingClientRect();
+  return {
+    x: rect.left + ((vector.x + 1) / 2) * rect.width,
+    y: rect.top + ((1 - vector.y) / 2) * rect.height,
+  };
+};

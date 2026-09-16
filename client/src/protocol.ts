@@ -1,45 +1,38 @@
 // The wire contract with the authoritative server
 // (server/Thronefall.Api/LiveMatch.cs). These types mirror
-// server/Thronefall.Engine/MatchSnapshot.cs field for field.
+// server/Thronefall.PositionalEngine/MatchSnapshot.cs field for field.
 //
 // Nothing in this file computes a game value. The client sends intents and
 // renders what comes back — docs/GAME_DESIGN.md §5.2.
 
 export interface StructureView {
+  id: string;
+  key: string; // "tower" | "keep"
+  x: number;
+  z: number;
   hp: number;
   maxHp: number;
   destroyed: boolean;
 }
 
-export interface FarmView {
+/** waypointX/Z are null when the unit has no pending order — sitting exactly
+ * where it was placed, per the "nothing auto-advances" rule. */
+export interface UnitView {
+  id: string;
+  key: string; // a troop key, e.g. "cavalry"
+  x: number;
+  z: number;
   hp: number;
   maxHp: number;
-  incomeRemoved: boolean;
-}
-
-/** progress: 0 at departure, 1 at arrival (never actually observed — the
- * troop resolves and disappears within the tick it would reach 1). */
-export interface MarchingTroopView {
-  troopKey: string;
-  progress: number;
-}
-
-export interface CommanderView {
-  key: string;
-  rage: number;
-  rageCost: number;
-  /** server's verdict on whether the rage skill can fire right now */
-  ready: boolean;
-  casts: number;
-  mastered: boolean;
+  waypointX: number | null;
+  waypointZ: number | null;
 }
 
 export interface SideView {
   name: string;
   gold: number;
   income: number;
-  incomePenalty: number;
-  farms: FarmView[];
+  farms: number;
   hasBarracks: boolean;
   /** null when the single build slot is idle — the server always sends the key */
   buildBusy: string | null;
@@ -48,13 +41,8 @@ export interface SideView {
   troopTimer: number;
   troopKey: string | null;
   troopsProduced: number;
-  towers: StructureView[];
-  keep: StructureView;
-  commanders: CommanderView[];
-  towersLost: number;
-  farmsRaided: number;
-  /** troops THIS side sent, still in flight toward the opponent */
-  marchingTroops: MarchingTroopView[];
+  structures: StructureView[];
+  units: UnitView[];
 }
 
 export interface MatchState {
@@ -77,17 +65,26 @@ export interface BuildingCatalogEntry {
 export interface TroopCatalogEntry {
   cost: number;
   buildTime: number;
-  marchTime: number;
+  hp: number;
+  dps: number;
+  range: number;
+  speed: number;
+}
+
+export interface DefenseCatalogEntry {
+  hp: number;
+  dps: number;
+  range: number;
 }
 
 export interface Catalog {
   buildings: Record<string, BuildingCatalogEntry>;
   troops: Record<string, TroopCatalogEntry>;
-  commanders: Record<string, { rageCost: number }>;
-  rage: { max: number; fillRatePerSec: number };
+  defense: { towerCount: number; tower: DefenseCatalogEntry; keep: DefenseCatalogEntry };
+  layout: { plotDepth: number; tower: number; econ: number; keep: number };
 }
 
-export type CommandKind = "build" | "train" | "repair" | "castRage";
+export type CommandKind = "build" | "train" | "repair" | "moveUnit";
 
 export interface CommandAck {
   type: "ack";
@@ -176,11 +173,15 @@ export class MatchConnection {
     }
   }
 
-  /** Fire an intent. The server decides; a refusal comes back as an ack. */
-  send(kind: CommandKind, arg = ""): number {
+  /** Fire an intent. The server decides; a refusal comes back as an ack.
+   * x/z only matter for "moveUnit" (arg is the unit's id there). */
+  send(kind: CommandKind, arg = "", x?: number, z?: number): number {
     if (this.socket.readyState !== WebSocket.OPEN) return -1;
     this.seq += 1;
-    this.socket.send(JSON.stringify({ type: "command", kind, arg, seq: this.seq }));
+    const payload: Record<string, unknown> = { type: "command", kind, arg, seq: this.seq };
+    if (x !== undefined) payload.x = x;
+    if (z !== undefined) payload.z = z;
+    this.socket.send(JSON.stringify(payload));
     return this.seq;
   }
 
@@ -203,9 +204,12 @@ const REFUSAL_TEXT: Record<string, string> = {
   "barracks-already-built": "Barracks already built",
   "unknown-troop": "Unknown troop",
   "unknown-building": "Unknown building",
-  "rage-not-charged": "Rage isn't charged yet",
-  "commander-not-in-squad": "That commander isn't in your squad",
   "nothing-to-repair-or-not-enough-gold": "Nothing to repair (or not enough gold)",
+  "unknown-unit": "Unknown unit",
+  "not-your-unit": "That isn't your unit",
+  "unit-already-dead": "That unit is gone",
+  "move-needs-coordinates": "Move command needs a destination",
+  "invalid-move": "That move isn't valid",
 };
 
 export const refusalText = (reason: string | null): string =>

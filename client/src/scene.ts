@@ -1,28 +1,19 @@
 import * as THREE from "three";
-import type { MatchState, SideView } from "./protocol";
+import type { MatchState, SideView, StructureView } from "./protocol";
 
-// Shared-battlefield placeholder scene: both plots visible at once — your
-// base near the camera, the enemy's mirrored across a river strip, matching
-// the Clash Royale reference composition (docs/art-bible.html, docs/
-// ART_DIRECTION.md). Geometry is deliberately primitive; what matters here is
-// the layout and the state binding, not the art. Real models replace these
-// meshes later without touching update()'s shape.
+// The real-time positional battlefield. Every mesh here reflects a value
+// the server sent — structures and units both carry real (x, z) from
+// server/Thronefall.PositionalEngine/MatchSnapshot.cs, so this file never
+// invents a position or a motion; it renders exactly what came off the wire
+// and eases visually between ticks for smoothness only (see tick()).
 //
-// Nothing here decides anything. Every mesh reflects a value the server sent.
-// Troop markers exist because MarchingTroopView does now (see PROGRESS.md's
-// "shared battlefield" entry) — without a reported position there was
-// nothing to place here at all.
+// Picking/dragging is exposed here (pickOwnUnitAt, groundPointAt) but
+// ORCHESTRATED in main.ts — this file stays "what does the field look like
+// right now", not "what does a pointer gesture mean".
 
 const PLOT_WIDTH = 10;
-const PLOT_DEPTH = 7.5; // one side's depth, river to rear
 const RIVER_DEPTH = 1.6;
-const HALF_SPAN = PLOT_DEPTH + RIVER_DEPTH / 2;
-
-// Fractions of PLOT_DEPTH from the river inward — this is also the raid
-// order a troop actually resolves in (tower, then farm, then keep), so it
-// doubles as a rough "how far in" read even though combat itself still
-// resolves in one tick on arrival, not stage by stage.
-const LAYOUT = { tower: 0.36, econ: 0.58, keep: 0.86 };
+const HALF_SPAN = 9; // generous fixed camera framing; real plot depth comes from the server's catalog
 
 const COLORS = {
   sky: 0x141b2c,
@@ -31,187 +22,63 @@ const COLORS = {
   grid: 0x2f4d36,
   keep: 0xb9a06a,
   tower: 0x8f97a8,
-  farm: 0xc8a13a,
-  barracks: 0x9c5b3c,
   rubble: 0x3a3f4a,
   you: 0x3b8fef,
   enemy: 0xe2564a,
+  selected: 0xffe066,
+  ghost: 0xffffff,
 };
+
+interface UnitEntry {
+  mesh: THREE.Mesh;
+  targetX: number;
+  targetZ: number;
+}
 
 export interface CityScene {
   scene: THREE.Scene;
   camera: THREE.PerspectiveCamera;
   onResize(width: number, height: number): void;
   update(state: MatchState): void;
+  /** Eases meshes toward their latest reported position — called every
+   * render frame, independent of how often server ticks arrive. */
+  tick(deltaSeconds: number): void;
+  /** Normalized device coords (-1..1, three.js convention) -> your own unit
+   * id under the pointer, or null. Only "you" units are ever returned —
+   * nothing here lets a pointer pick up an enemy unit. */
+  pickOwnUnitAt(ndcX: number, ndcY: number): string | null;
+  /** Normalized device coords -> world (x, z) on the ground plane. */
+  groundPointAt(ndcX: number, ndcY: number): { x: number; z: number };
+  setSelected(unitId: string | null): void;
+  setDragGhost(point: { x: number; z: number } | null): void;
 }
 
-/** A build in progress sits low and rises as it completes — a silhouette cue
- * that something is happening without reading the timer text. */
-function applyBuildProgress(mesh: THREE.Object3D, baseY: number, progress: number) {
-  const scale = Math.max(0.05, progress);
-  mesh.scale.y = scale;
-  mesh.position.y = baseY * scale;
+function teamColor(whose: "you" | "enemy") {
+  return whose === "you" ? COLORS.you : COLORS.enemy;
 }
 
-interface Plot {
-  update(side: SideView): void;
-  /** world-space spawn point for this plot's outgoing troops */
-  barracksAnchor: THREE.Vector3;
-  /** world-space target point incoming troops march toward */
-  keepAnchor: THREE.Vector3;
-}
-
-/**
- * One player's base. `direction` is +1 for the near/own plot (extends toward
- * the camera) and -1 for the far/enemy plot (mirrored across the river) —
- * every local depth below is measured from the river and then signed by it.
- */
-function buildPlot(scene: THREE.Scene, direction: 1 | -1, teamColor: number): Plot {
-  const z = (localDepth: number) => direction * localDepth;
-
-  // team flag: a small color strip identifies whose structure this is,
-  // without needing a second full material palette for the stonework itself
-  function flag(width: number): THREE.Mesh {
-    const strip = new THREE.Mesh(
-      new THREE.BoxGeometry(width, 0.18, 0.18),
-      new THREE.MeshStandardMaterial({ color: teamColor, roughness: 0.4 }),
-    );
-    return strip;
-  }
-
-  // --- keep ---
-  const keepMat = new THREE.MeshStandardMaterial({ color: COLORS.keep, roughness: 0.6 });
-  const keep = new THREE.Mesh(new THREE.BoxGeometry(2, 2.4, 2), keepMat);
-  keep.position.set(0, 1.2, z(LAYOUT.keep * PLOT_DEPTH));
-  scene.add(keep);
-  const keepFlag = flag(1.6);
-  keepFlag.position.set(0, 1.45, 0);
-  keep.add(keepFlag);
-
-  // --- towers ---
-  const towerGeo = new THREE.CylinderGeometry(0.8, 0.9, 1.8, 8);
-  const towers = [-1, 1].map((side) => {
-    const tower = new THREE.Mesh(towerGeo, new THREE.MeshStandardMaterial({ color: COLORS.tower, roughness: 0.7 }));
-    tower.position.set(side * 3, 0.9, z(LAYOUT.tower * PLOT_DEPTH));
-    scene.add(tower);
-    const towerFlag = flag(0.9);
-    towerFlag.position.set(0, 1.05, 0);
-    tower.add(towerFlag);
-    return tower;
-  });
-
-  // --- farms ---
-  const farmGeo = new THREE.BoxGeometry(1.6, 0.35, 1.6);
-  const farms = [-1, 1].map((side) => {
-    const farm = new THREE.Mesh(farmGeo, new THREE.MeshStandardMaterial({ color: COLORS.farm, roughness: 0.9 }));
-    farm.position.set(side * 3.4, 0.18, z(LAYOUT.econ * PLOT_DEPTH));
-    farm.visible = false;
-    scene.add(farm);
-    return farm;
-  });
-
-  // --- barracks: alongside the farms, at the same depth ---
-  const barracks = new THREE.Mesh(
-    new THREE.BoxGeometry(2.2, 1.1, 1.6),
-    new THREE.MeshStandardMaterial({ color: COLORS.barracks, roughness: 0.8 }),
+function createStructureMesh(key: string, whose: "you" | "enemy"): THREE.Mesh {
+  const geo =
+    key === "keep"
+      ? new THREE.BoxGeometry(2, 2.4, 2)
+      : new THREE.CylinderGeometry(0.8, 0.9, 1.8, 8);
+  const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: key === "keep" ? COLORS.keep : COLORS.tower, roughness: 0.65 }));
+  mesh.position.y = key === "keep" ? 1.2 : 0.9;
+  const flagWidth = key === "keep" ? 1.6 : 0.9;
+  const flag = new THREE.Mesh(
+    new THREE.BoxGeometry(flagWidth, 0.18, 0.18),
+    new THREE.MeshStandardMaterial({ color: teamColor(whose), roughness: 0.4 }),
   );
-  barracks.position.set(0, 0.55, z(LAYOUT.econ * PLOT_DEPTH));
-  barracks.visible = false;
-  scene.add(barracks);
-
-  const barracksAnchor = new THREE.Vector3(0, 0.7, z(LAYOUT.econ * PLOT_DEPTH));
-  const keepAnchor = new THREE.Vector3(0, 0.7, z(LAYOUT.keep * PLOT_DEPTH));
-
-  function update(side: SideView) {
-    // keep: tint toward red as HP drops
-    const keepFraction = side.keep.maxHp > 0 ? side.keep.hp / side.keep.maxHp : 0;
-    keepMat.color.setHex(side.keep.destroyed ? COLORS.rubble : COLORS.keep);
-    keepMat.emissive.setRGB(side.keep.destroyed ? 0 : Math.max(0, 0.22 - keepFraction * 0.22), 0, 0);
-    keepFlag.visible = !side.keep.destroyed;
-
-    // towers: a destroyed tower sinks into rubble
-    towers.forEach((tower, i) => {
-      const view = side.towers[i];
-      if (!view) return;
-      const material = tower.material as THREE.MeshStandardMaterial;
-      const towerFlag = tower.children[0];
-      if (view.destroyed) {
-        material.color.setHex(COLORS.rubble);
-        material.emissive.setRGB(0, 0, 0); // clear the damage tint, or the rubble keeps glowing red
-        tower.scale.y = 0.25;
-        tower.position.y = 0.9 * 0.25;
-        towerFlag.visible = false;
-      } else {
-        material.color.setHex(COLORS.tower);
-        tower.scale.y = 1;
-        tower.position.y = 0.9;
-        towerFlag.visible = true;
-        const fraction = view.maxHp > 0 ? view.hp / view.maxHp : 1;
-        material.emissive.setRGB(Math.max(0, 0.22 - fraction * 0.22), 0, 0);
-      }
-    });
-
-    // farms
-    farms.forEach((farm, i) => {
-      const view = side.farms[i];
-      farm.visible = view !== undefined;
-      if (!view) return;
-      const material = farm.material as THREE.MeshStandardMaterial;
-      material.color.setHex(view.hp <= 0 ? COLORS.rubble : COLORS.farm);
-    });
-
-    // barracks — shows its build progress while under construction
-    if (side.hasBarracks) {
-      barracks.visible = true;
-      applyBuildProgress(barracks, 0.55, 1);
-    } else if (side.buildBusy === "barracks") {
-      barracks.visible = true;
-      // buildTimer counts down; without the catalog's total we show it
-      // rising from a floor — the exact curve is cosmetic, the trigger is
-      // server state
-      applyBuildProgress(barracks, 0.55, 0.25);
-    } else {
-      barracks.visible = false;
-    }
-  }
-
-  return { update, barracksAnchor, keepAnchor };
+  flag.position.y = key === "keep" ? 0.25 : 0.15;
+  mesh.add(flag);
+  return mesh;
 }
 
-/**
- * Fixed pool of simple markers for in-flight troops. Reused across ticks
- * rather than created/destroyed, and sized well above anything a real match
- * produces — a marker that isn't needed this tick is just hidden.
- * InstancedMesh is the right call once these are real models with real
- * counts; a plain pool is plenty for this many placeholder spheres.
- */
-function buildTroopPool(scene: THREE.Scene, count: number, color: number): THREE.Mesh[] {
-  const geo = new THREE.SphereGeometry(0.28, 10, 8);
-  const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.5 });
-  const pool: THREE.Mesh[] = [];
-  for (let i = 0; i < count; i++) {
-    const marker = new THREE.Mesh(geo, mat);
-    marker.visible = false;
-    scene.add(marker);
-    pool.push(marker);
-  }
-  return pool;
-}
-
-function placeTroops(
-  pool: THREE.Mesh[],
-  troops: SideView["marchingTroops"],
-  from: THREE.Vector3,
-  to: THREE.Vector3,
-) {
-  troops.forEach((troop, i) => {
-    const marker = pool[i];
-    if (!marker) return; // pool exhausted — cosmetic only, never drops a real troop
-    marker.visible = true;
-    marker.position.lerpVectors(from, to, troop.progress);
-    marker.position.y = 0.5 + Math.sin(troop.progress * Math.PI) * 0.15; // a little hop, not a flat slide
-  });
-  for (let i = troops.length; i < pool.length; i++) pool[i].visible = false;
+function createUnitMesh(whose: "you" | "enemy"): THREE.Mesh {
+  const geo = new THREE.SphereGeometry(0.32, 12, 10);
+  const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: teamColor(whose), roughness: 0.5 }));
+  mesh.position.y = 0.5;
+  return mesh;
 }
 
 export function buildCityScene(): CityScene {
@@ -220,9 +87,8 @@ export function buildCityScene(): CityScene {
   scene.fog = new THREE.Fog(COLORS.sky, 26, 46);
 
   const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 100);
-  // pulled back and raised to frame both plots at once — still fixed by
-  // design, control is one-thumb tap-to-build, not camera dragging (see
-  // docs/GAME_DESIGN.md §2 — single-thumb, portrait)
+  // pulled back and raised to frame the whole field — fixed by design,
+  // control is drag-to-move on units, not camera dragging (docs/GAME_DESIGN.md §2)
   camera.position.set(0, 19, 17);
   camera.lookAt(0, 0, 0);
 
@@ -242,8 +108,8 @@ export function buildCityScene(): CityScene {
   grid.position.y = 0.01;
   scene.add(grid);
 
-  // the river: the boundary both plots are mirrored across, and the visual
-  // cue for "this is one shared field, not two disconnected screens"
+  // the river: the boundary both bases are mirrored across, and the visual
+  // cue for "this is one shared field"
   const river = new THREE.Mesh(
     new THREE.PlaneGeometry(PLOT_WIDTH, RIVER_DEPTH),
     new THREE.MeshStandardMaterial({ color: COLORS.river, roughness: 0.3, metalness: 0.1 }),
@@ -252,27 +118,139 @@ export function buildCityScene(): CityScene {
   river.position.y = 0.02;
   scene.add(river);
 
-  // Empirically verified, not assumed: with this camera's exact pitch,
-  // direction=-1 (negative Z) renders nearer/lower in frame and +1 renders
-  // farther/higher — the opposite of the naive "positive Z = closer to a
-  // positive-Z camera" read. Swapped here rather than renaming the
-  // direction parameter everywhere it's used below.
-  const yours = buildPlot(scene, -1, COLORS.you);
-  const enemy = buildPlot(scene, 1, COLORS.enemy);
+  const structureMeshes = new Map<string, THREE.Mesh>();
+  const youUnits = new Map<string, UnitEntry>();
+  const enemyUnits = new Map<string, UnitEntry>();
 
-  // one pool per direction of travel, not per side, since a troop's marker
-  // needs to know which anchor pair to lerp between
-  const outgoingPool = buildTroopPool(scene, 16, COLORS.you);
-  const incomingPool = buildTroopPool(scene, 16, COLORS.enemy);
+  const selectionRing = new THREE.Mesh(
+    new THREE.RingGeometry(0.42, 0.52, 24),
+    new THREE.MeshBasicMaterial({ color: COLORS.selected, side: THREE.DoubleSide }),
+  );
+  selectionRing.rotation.x = -Math.PI / 2;
+  selectionRing.visible = false;
+  scene.add(selectionRing);
+
+  const dragGhost = new THREE.Mesh(
+    new THREE.RingGeometry(0.3, 0.4, 20),
+    new THREE.MeshBasicMaterial({ color: COLORS.ghost, transparent: true, opacity: 0.6, side: THREE.DoubleSide }),
+  );
+  dragGhost.rotation.x = -Math.PI / 2;
+  dragGhost.visible = false;
+  scene.add(dragGhost);
+
+  function updateStructureAppearance(mesh: THREE.Mesh, view: StructureView) {
+    const material = mesh.material as THREE.MeshStandardMaterial;
+    if (view.destroyed) {
+      material.color.setHex(COLORS.rubble);
+      material.emissive.setRGB(0, 0, 0);
+      mesh.scale.y = 0.25;
+      mesh.children.forEach((c) => (c.visible = false));
+    } else {
+      material.color.setHex(view.key === "keep" ? COLORS.keep : COLORS.tower);
+      mesh.scale.y = 1;
+      mesh.children.forEach((c) => (c.visible = true));
+      const fraction = view.maxHp > 0 ? view.hp / view.maxHp : 1;
+      material.emissive.setRGB(Math.max(0, 0.22 - fraction * 0.22), 0, 0);
+    }
+  }
+
+  function updateSide(side: SideView, whose: "you" | "enemy") {
+    for (const s of side.structures) {
+      let mesh = structureMeshes.get(s.id);
+      if (!mesh) {
+        mesh = createStructureMesh(s.key, whose);
+        scene.add(mesh);
+        structureMeshes.set(s.id, mesh);
+      }
+      const baseY = mesh.position.y || (s.key === "keep" ? 1.2 : 0.9);
+      mesh.position.set(s.x, baseY, s.z);
+      updateStructureAppearance(mesh, s);
+    }
+
+    const pool = whose === "you" ? youUnits : enemyUnits;
+    const seen = new Set<string>();
+    for (const u of side.units) {
+      seen.add(u.id);
+      let entry = pool.get(u.id);
+      if (!entry) {
+        const mesh = createUnitMesh(whose);
+        mesh.position.set(u.x, mesh.position.y, u.z);
+        scene.add(mesh);
+        entry = { mesh, targetX: u.x, targetZ: u.z };
+        pool.set(u.id, entry);
+      }
+      entry.targetX = u.x;
+      entry.targetZ = u.z;
+      const fraction = u.maxHp > 0 ? u.hp / u.maxHp : 1;
+      const material = entry.mesh.material as THREE.MeshStandardMaterial;
+      material.emissive.setRGB(Math.max(0, 0.35 - fraction * 0.35), 0, 0);
+    }
+    for (const [id, entry] of pool) {
+      if (!seen.has(id)) {
+        scene.remove(entry.mesh);
+        pool.delete(id);
+      }
+    }
+  }
 
   function update(state: MatchState) {
-    yours.update(state.you);
-    enemy.update(state.enemy);
+    updateSide(state.you, "you");
+    updateSide(state.enemy, "enemy");
+  }
 
-    // your outgoing troops travel from your barracks to the enemy's keep;
-    // the enemy's outgoing troops travel from theirs to yours
-    placeTroops(outgoingPool, state.you.marchingTroops, yours.barracksAnchor, enemy.keepAnchor);
-    placeTroops(incomingPool, state.enemy.marchingTroops, enemy.barracksAnchor, yours.keepAnchor);
+  function tick(deltaSeconds: number) {
+    // exponential ease toward the latest reported position — ticks arrive
+    // once per simulated second, so this is purely cosmetic smoothing, never
+    // a source of truth for where anything actually is
+    const ease = 1 - Math.pow(0.001, deltaSeconds);
+    for (const pool of [youUnits, enemyUnits]) {
+      for (const entry of pool.values()) {
+        entry.mesh.position.x += (entry.targetX - entry.mesh.position.x) * ease;
+        entry.mesh.position.z += (entry.targetZ - entry.mesh.position.z) * ease;
+      }
+    }
+  }
+
+  const raycaster = new THREE.Raycaster();
+  const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+
+  function groundPointAt(ndcX: number, ndcY: number): { x: number; z: number } {
+    raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), camera);
+    const hit = new THREE.Vector3();
+    raycaster.ray.intersectPlane(groundPlane, hit);
+    return { x: hit.x, z: hit.z };
+  }
+
+  function pickOwnUnitAt(ndcX: number, ndcY: number): string | null {
+    raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), camera);
+    const meshes = [...youUnits.values()].map((e) => e.mesh);
+    const hits = raycaster.intersectObjects(meshes, false);
+    if (hits.length === 0) return null;
+    for (const [id, entry] of youUnits) if (entry.mesh === hits[0].object) return id;
+    return null;
+  }
+
+  function setSelected(unitId: string | null) {
+    if (unitId === null) {
+      selectionRing.visible = false;
+      return;
+    }
+    const entry = youUnits.get(unitId);
+    if (!entry) {
+      selectionRing.visible = false;
+      return;
+    }
+    selectionRing.visible = true;
+    selectionRing.position.set(entry.mesh.position.x, 0.03, entry.mesh.position.z);
+  }
+
+  function setDragGhost(point: { x: number; z: number } | null) {
+    if (point === null) {
+      dragGhost.visible = false;
+      return;
+    }
+    dragGhost.visible = true;
+    dragGhost.position.set(point.x, 0.03, point.z);
   }
 
   function onResize(width: number, height: number) {
@@ -280,5 +258,5 @@ export function buildCityScene(): CityScene {
     camera.updateProjectionMatrix();
   }
 
-  return { scene, camera, onResize, update };
+  return { scene, camera, onResize, update, tick, pickOwnUnitAt, groundPointAt, setSelected, setDragGhost };
 }

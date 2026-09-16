@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 // End-to-end smoke check: drives the real client, in a real browser, at a real
-// phone size, against the real server. Plays a match through to its result and
-// fails loudly on any console error.
+// phone size, against the real server. Plays a match through to its result,
+// performs a REAL drag gesture to move a trained unit, and fails loudly on
+// any console error. Backed by Thronefall.PositionalEngine — see
+// docs/PROGRESS.md for the pivot from the old staged-combat engine.
 //
 // The tamper probe sends a raw WebSocket frame with a nonsense troop key
 // rather than clicking a disabled UI button. That was tried first and was
@@ -23,7 +25,7 @@
 //
 // Usage:
 //   node client/e2e/smoke.mjs [--url http://localhost:5173]
-//                             [--opponent atk|eco|def] [--speed 20]
+//                             [--opponent eco|def|atk] [--speed 6]
 //                             [--shots ./shots]
 //
 // Playwright is a peer requirement, not a client dependency — the game itself
@@ -59,8 +61,16 @@ const flag = (name, fallback) => {
 };
 
 const base = flag("url", "http://localhost:5173");
-const opponent = flag("opponent", "atk");
-const speed = flag("speed", "20");
+// "eco" (slow to field an army) and a modest --speed by default: the drag
+// check needs a real WALL-CLOCK window for its async multi-step Playwright
+// gesture (several evaluate()/mouse round-trips) to land before anything it
+// touches dies or the match itself ends — at speed=15+, a full match can
+// conclude for real in under 10 seconds, leaving no margin. An opponent
+// killing a fresh unit or reaching your keep in that window is a correct
+// server verdict, not a bug, but it makes the CHECK flaky. Override with
+// --opponent/--speed for a specific matchup.
+const opponent = flag("opponent", "eco");
+const speed = flag("speed", "6");
 const shotDir = flag("shots", "");
 
 const fail = (message) => {
@@ -91,6 +101,17 @@ await page.addInitScript(() => {
   window.WebSocket = function (...args) {
     const socket = new Native(...args);
     window.__thronefallSocket = socket;
+    // captured purely for the test harness to read real server state (unit
+    // positions) without duplicating any client logic — the app itself never
+    // reads this
+    window.__thronefallAcks = [];
+    socket.addEventListener("message", (event) => {
+      try {
+        const msg = JSON.parse(event.data);
+        if (msg.type === "state") window.__thronefallLatestState = msg;
+        if (msg.type === "ack") window.__thronefallAcks.push(msg);
+      } catch { /* not JSON we care about */ }
+    });
     return socket;
   };
   window.WebSocket.prototype = Native.prototype;
@@ -104,11 +125,10 @@ await page.waitForTimeout(600);
 const opening = await page.evaluate(() => ({
   builds: document.querySelectorAll(".builds .action").length,
   troops: document.querySelectorAll(".troops .action").length,
-  commanders: document.querySelectorAll(".commander").length,
   clock: document.querySelector(".clock")?.textContent ?? "",
 }));
 console.log("catalog rendered:", JSON.stringify(opening));
-if (opening.troops === 0 || opening.commanders === 0) fail("server catalog never rendered");
+if (opening.troops === 0 || opening.builds === 0) fail("server catalog never rendered");
 if (opening.clock === "—:—") fail("no state frame arrived");
 
 // A tampered client: send a command no legitimate button could ever produce.
@@ -135,7 +155,9 @@ if (!refused.text.toLowerCase().includes("unknown")) fail(`unexpected refusal re
 
 await shot("01-start");
 
-// play it out
+// play it out: build a barracks, train troops, and — the new part — once a
+// unit exists, actually DRAG it on the canvas (a real pointer gesture, not a
+// button click) and confirm the server accepts the resulting moveUnit.
 const press = (row, label) =>
   page.evaluate(
     ({ row, label }) => {
@@ -150,19 +172,56 @@ const press = (row, label) =>
   );
 
 let trained = 0;
-let casts = 0;
+let dragged = false;
+let dragAccepted = false;
+let dragAttempts = 0;
 let midShot = false;
-for (let i = 0; i < 200; i++) {
+for (let i = 0; i < 400; i++) {
   if (await page.evaluate(() => document.querySelector(".banner")?.hidden === false)) break;
   await press(".builds", "Barracks");
   if (await press(".troops", "Cavalry")) trained += 1;
-  casts += await page.evaluate(() => {
-    const ready = [...document.querySelectorAll(".commander.ready")];
-    ready.forEach((c) => c.click());
-    return ready.length;
-  });
-  // capture as soon as the base is actually doing something, not at a fixed
-  // iteration — a fast match can end before any fixed index is reached
+
+  // Retries with whatever unit currently exists: at high --speed, a freshly
+  // trained unit can die in combat before an async multi-step Playwright
+  // drag round-trips, which is a real (and correct) "unit-already-dead"
+  // rejection, not a bug in the drag itself — so retry with a fresh unit
+  // rather than fight the timing.
+  if (!dragAccepted && dragAttempts < 10) {
+    const unit = await page.evaluate(() => window.__thronefallLatestState?.you?.units?.[0] ?? null);
+    if (unit) {
+      dragged = true;
+      dragAttempts += 1;
+      const from = await page.evaluate((u) => window.__thronefallProject(u.x, u.z), unit);
+      const enemyKeep = await page.evaluate(
+        () => window.__thronefallLatestState.enemy.structures.find((s) => s.key === "keep"),
+      );
+      const to = await page.evaluate((k) => window.__thronefallProject(k.x, k.z), enemyKeep);
+
+      const acksBefore = await page.evaluate(() => window.__thronefallAcks.length);
+      await page.mouse.move(from.x, from.y);
+      await page.mouse.down();
+      await page.mouse.move(to.x, to.y, { steps: 8 });
+      await page.mouse.up();
+
+      // look for the moveUnit ack itself — checking the unit's waypoint
+      // afterward is a race: a fast unit can already have arrived (waypoint
+      // cleared back to null on arrival) before the next poll runs
+      let moveAck = null;
+      for (let j = 0; j < 15 && !moveAck; j++) {
+        await page.waitForTimeout(100);
+        moveAck = await page.evaluate(
+          (from) => window.__thronefallAcks.slice(from).find((a) => a.kind === "moveUnit") ?? null,
+          acksBefore,
+        );
+      }
+      console.log(`drag attempt ${dragAttempts} from/to:`, JSON.stringify(from), JSON.stringify(to), "moveAck:", JSON.stringify(moveAck));
+      if (moveAck?.accepted === true) dragAccepted = true;
+      else if (moveAck && moveAck.reason !== "unit-already-dead") fail(`moveUnit refused for an unexpected reason: ${JSON.stringify(moveAck)}`);
+      // a null ack (no response yet) usually means the match ended mid-flight
+      // — not a protocol problem, just nothing left to retry against
+    }
+  }
+
   if (!midShot && trained > 0) {
     midShot = true;
     await shot("02-playing");
@@ -178,11 +237,12 @@ const final = await page.evaluate(() => ({
 }));
 await shot("03-end");
 
-console.log(`played: cavalry=${trained} rageCasts=${casts}`);
+console.log(`played: cavalry=${trained} dragged=${dragged} dragAccepted=${dragAccepted}`);
 console.log("final:", JSON.stringify(final));
 if (!final.bannerShown) fail("match never resolved");
 if (trained === 0) fail("no troop was ever trained — the command path is dead");
-if (casts === 0) fail("no rage skill ever became castable");
+if (!dragged) fail("never got the chance to drag a unit — none appeared on the battlefield");
+if (!dragAccepted) fail("dragging a unit never resulted in the server reporting it as moving (waypoint set)");
 if (errors.length) fail(`console errors: ${JSON.stringify(errors)}`);
 
 await browser.close();

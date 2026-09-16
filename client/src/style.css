@@ -106,7 +106,6 @@ body {
 
 #app,
 .action,
-.commander,
 .gold-amount,
 .income,
 .clock,
@@ -340,70 +339,6 @@ body {
 
 .action-price.unaffordable {
   color: #ffc7b0;
-}
-
-.commanders {
-  gap: 8px;
-}
-
-/* commander buttons: same bevel family, purple, with the rage bar as an
-   inner fill rather than the button's own face color */
-.commander {
-  position: relative;
-  flex: 1 1 0;
-  min-height: 54px;
-  border: 3px solid var(--g-navy-d);
-  border-radius: 11px;
-  background: linear-gradient(180deg, #4a3a72, #2e2350);
-  box-shadow:
-    0 4px 0 var(--g-purple-d),
-    0 6px 9px rgba(0, 0, 0, 0.4);
-  color: #fff;
-  font-size: 11px;
-  font-weight: 400;
-  overflow: hidden;
-  cursor: pointer;
-  text-shadow: 0 1.5px 0 rgba(0, 0, 0, 0.55);
-  transition: transform 0.06s ease, box-shadow 0.06s ease;
-}
-
-.commander:active:not(:disabled) {
-  transform: translateY(4px);
-  box-shadow:
-    0 1px 0 var(--g-purple-d),
-    0 2px 5px rgba(0, 0, 0, 0.4);
-}
-
-.commander:disabled {
-  filter: grayscale(0.35);
-  opacity: 0.7;
-}
-
-/* the rage bar fills from the bottom — the one resource the player times
-   by hand (docs/GAME_DESIGN.md's commander system), so it gets the most
-   saturated color family in the whole HUD */
-.rage-fill {
-  position: absolute;
-  inset: auto 0 0 0;
-  height: 0%;
-  background: linear-gradient(180deg, #f072c8, var(--g-elixir));
-  transition: height 220ms linear;
-}
-
-.commander-label {
-  position: relative;
-}
-
-.commander.ready {
-  box-shadow:
-    0 0 0 2px var(--g-gold) inset,
-    0 4px 0 var(--g-purple-d),
-    0 6px 9px rgba(0, 0, 0, 0.4);
-}
-
-.commander.mastered .commander-label::after {
-  content: " \2605";
-  color: var(--g-gold);
 }
 
 .toast {
