@@ -55,13 +55,20 @@ test("sanity: no negative gold / HP, no NaN, across all matchups", () => {
   }
 });
 
-test("pacing: no matchup ends before 60s (a structural instant-collapse bug)", () => {
+// Floor revised from the old model's 60s to 90s after discussion with the
+// user: the old 120-360s WINDOW was calibrated for staged, instant-per-troop
+// resolution and doesn't map onto this model's continuous, geometry-driven
+// combat, so the strict upper bound was dropped (reaching time-up with no
+// kill is a healthy outcome here too, same as the old model). The lower
+// floor is kept and raised slightly, since a genuinely fast collapse is
+// still exactly the failure this test exists to catch. See docs/PROGRESS.md.
+test("pacing: no matchup ends before 90s (a structural instant-collapse bug)", () => {
   for (const [a, b] of MATCHUPS) {
     const { battle, A, B } = run(a, b);
     for (const pl of [A, B]) {
       const diedAt = keepDestroyedAtT(battle, pl);
       if (diedAt !== null) {
-        assert.ok(diedAt >= 60,
+        assert.ok(diedAt >= 90,
           `${pl.strategy.name} keep died at t=${diedAt}s in a ${a} vs ${b} match — defense collapsed almost immediately`);
       }
     }

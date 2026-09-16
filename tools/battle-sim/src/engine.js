@@ -93,7 +93,15 @@ class Battle {
     return [...this.structures.values()].filter((s) => !s.destroyed && (side === undefined || s.side === side));
   }
 
-  _nearestEnemyTarget(entity) {
+  /** unitsOnly: structures only ever target enemy UNITS, never each other —
+   * a stationary tower has no combat reason to duel another stationary
+   * structure with no unit involved. Without this, two mirrored towers
+   * within each other's range (a real layout fact: the client's tower
+   * depth puts them well inside a 6.0 range across the river) fight each
+   * other from tick 0 regardless of economy or troops, silently dominating
+   * every full-match outcome — caught by a calibration sweep whose numbers
+   * made no sense until traced back to this (see docs/PROGRESS.md). */
+  _nearestEnemyTarget(entity, unitsOnly = false) {
     const enemySide = entity.side === "A" ? "B" : "A";
     let best = null;
     let bestDist = Infinity;
@@ -101,9 +109,11 @@ class Battle {
       const d = distance(entity, u);
       if (d <= entity.range && d < bestDist) { best = u; bestDist = d; }
     }
-    for (const s of this.aliveStructures(enemySide)) {
-      const d = distance(entity, s);
-      if (d <= entity.range && d < bestDist) { best = s; bestDist = d; }
+    if (!unitsOnly) {
+      for (const s of this.aliveStructures(enemySide)) {
+        const d = distance(entity, s);
+        if (d <= entity.range && d < bestDist) { best = s; bestDist = d; }
+      }
     }
     return best;
   }
@@ -144,7 +154,7 @@ class Battle {
       if (target) pendingDamage.push({ id: target.id, amount: u.dps * dt });
     }
     for (const s of this.aliveStructures()) {
-      const target = this._nearestEnemyTarget(s);
+      const target = this._nearestEnemyTarget(s, true); // structures only ever target units
       s.targetId = target ? target.id : null;
       if (target) pendingDamage.push({ id: target.id, amount: s.dps * dt });
     }

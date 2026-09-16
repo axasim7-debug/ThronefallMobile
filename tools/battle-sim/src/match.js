@@ -100,6 +100,17 @@ class MatchPlayer {
     return [...this.towerIds.map((id) => this.battle.structures.get(id)), this.battle.structures.get(this.keepId)];
   }
 
+  /** Repair's own eligible targets — towers only, same as the shipped
+   * engine's DamagedStructureNeeding (server/Thronefall.Engine/
+   * MatchEngine.cs): the keep was never repairable, only reinforced over
+   * time. Reusing myStructures() (which includes the keep, correctly, for
+   * reinforcement bookkeeping) for repair too let "def" actively heal its
+   * keep — a capability the design never intended, and the real cause of
+   * it dominating every other archetype (see docs/PROGRESS.md). */
+  myTowers() {
+    return this.towerIds.map((id) => this.battle.structures.get(id));
+  }
+
   /** Recompute each of this side's structures' effective HP against the
    * rising reinforcement ceiling, after combat for tick `t` has resolved.
    * `beforeHp` is each structure's hp snapshotted right before this tick's
@@ -125,7 +136,7 @@ class MatchPlayer {
 
 function startRepair(pl, t) {
   if (pl.buildBusy) return false;
-  const target = pl.myStructures().find((s) => !s.destroyed && s.hp < reinforcementCeiling(s.maxHp, t));
+  const target = pl.myTowers().find((s) => !s.destroyed && s.hp < reinforcementCeiling(s.maxHp, t));
   if (!target) return false;
   const missing = reinforcementCeiling(target.maxHp, t) - target.hp;
   const cost = Math.ceil(missing * content.REPAIR.costPerMissingHp);
