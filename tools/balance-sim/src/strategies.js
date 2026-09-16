@@ -25,16 +25,20 @@ const ECO = {
 const DEF = {
   name: "def",
   squad: FULL_SQUAD,
+  // With no wall to build (removed — see docs/PROGRESS.md), "defensive"
+  // no longer means "invest in an extra structure before barracks": the
+  // only buildable structures are farm/barracks, both of which "eco" and
+  // "atk" already stress-test at their own extremes. This archetype's
+  // distinguishing trait now is upkeep discipline instead — one farm for a
+  // small cushion, then barracks, then a repair ALWAYS takes the idle build
+  // slot over spending on anything else once a tower is damaged.
   decide(pl, content, t) {
-    const { wall, barracks } = content.BUILDINGS;
-    // repairs only compete for the idle build slot once the initial
-    // wall -> barracks order is done, so they never preempt reaching barracks
-    if (pl.hasBarracks && startRepair(pl, content, t)) return;
-    if (pl.wallMaxHP < wall.maxSegments * wall.hpPerSegment && pl.gold >= wall.cost) {
-      pl.wallMaxHP += wall.hpPerSegment;
-      pl.gold -= wall.cost; pl.buildBusy = "wall"; pl.buildTimer = wall.buildTime; return;
+    const { farm, barracks } = content.BUILDINGS;
+    if (startRepair(pl, content, t)) return;
+    if (pl.farms.length < 1 && pl.gold >= farm.cost) {
+      pl.gold -= farm.cost; pl.buildBusy = "farm"; pl.buildTimer = farm.buildTime; return;
     }
-    if (pl.wallMaxHP >= wall.maxSegments * wall.hpPerSegment && !pl.hasBarracks && pl.gold >= barracks.cost) {
+    if (!pl.hasBarracks && pl.gold >= barracks.cost) {
       pl.gold -= barracks.cost; pl.buildBusy = "barracks"; pl.buildTimer = barracks.buildTime;
     }
   },

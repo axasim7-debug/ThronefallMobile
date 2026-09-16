@@ -1,21 +1,27 @@
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
-using Thronefall.Engine;
+using Thronefall.Api;
+using Thronefall.PositionalEngine;
 
-// Minimal authoritative-server proof of connectivity (docs/GAME_DESIGN.md
-// §5.3): a real WebSocket endpoint backed by the SAME MatchEngine that's
-// cross-validated against tools/balance-sim's JS numbers
-// (Thronefall.Engine.Tests). This first pass runs a bot-vs-bot match and
-// streams the result — it does NOT yet accept live player commands; that's
-// the next real step (docs/PROGRESS.md), not something to fake here.
+// Authoritative game server (docs/GAME_DESIGN.md §5.3), backed by
+// Thronefall.PositionalEngine — the continuous positional combat model,
+// cross-validated against tools/battle-sim's JS numbers
+// (Thronefall.PositionalEngine.Tests). Replaces the old staged/instant
+// engine here; see docs/PROGRESS.md for the full pivot history.
+//
+//   /ws/match       real-time match driven by real player commands
+//   /ws/demo-match  bot-vs-bot, result only — kept as the connectivity smoke test
 
 var builder = WebApplication.CreateBuilder(args);
 var app = builder.Build();
 
-app.MapGet("/health", () => Results.Ok(new { status = "ok", engine = "Thronefall.Engine" }));
+app.MapGet("/health", () => Results.Ok(new { status = "ok", engine = "Thronefall.PositionalEngine" }));
 
 app.UseWebSockets();
+
+// Real-time player protocol — see LiveMatch.cs for the wire format.
+app.Map("/ws/match", LiveMatch.HandleAsync);
 
 app.Map("/ws/demo-match", async (HttpContext context) =>
 {
@@ -38,15 +44,15 @@ app.Map("/ws/demo-match", async (HttpContext context) =>
 
     await SendJson(socket, new { type = "matchStarted", a = stratAKey, b = stratBKey });
 
-    var (a, b, result) = MatchEngine.Simulate(stratA, stratB);
+    var (battle, a, b, result) = Match.SimulateMatch(stratA, stratB);
 
     await SendJson(socket, new
     {
         type = "matchResult",
         winner = result.Winner,
         tiebreak = result.Tiebreak,
-        a = Summarize(a),
-        b = Summarize(b),
+        a = Summarize(battle, a),
+        b = Summarize(battle, b),
     });
 
     await socket.CloseAsync(WebSocketCloseStatus.NormalClosure, "match complete", CancellationToken.None);
@@ -54,13 +60,12 @@ app.Map("/ws/demo-match", async (HttpContext context) =>
 
 app.Run();
 
-static object Summarize(PlayerState pl) => new
+static object Summarize(Battle battle, MatchPlayer pl) => new
 {
-    strategy = pl.Strategy,
+    strategy = pl.Name,
     troopsProduced = pl.TroopsProduced,
-    armyValue = pl.ArmyValue,
-    keepDestroyedAt = pl.KeepDestroyedAtT,
-    keepHpRemaining = Math.Round(MatchEngine.CurrentHp(pl.Keep, Content.Economy.DurationSeconds)),
+    keepDestroyedAt = Match.KeepDestroyedAtT(battle, pl),
+    keepHpRemaining = Math.Round(battle.Structures[pl.KeepId].Hp),
 };
 
 static async Task SendJson(WebSocket socket, object payload)

@@ -73,7 +73,7 @@ test("pacing: no matchup ends before 60s (a structural instant-collapse bug)", (
       if (pl.keepDestroyedAtT !== null) {
         assert.ok(pl.keepDestroyedAtT >= 60,
           `${pl.strategy} keep died at t=${pl.keepDestroyedAtT}s in a ${a} vs ${b} match — ` +
-          `defense is being bypassed almost immediately, check wall/tower/keep chaining`);
+          `defense is being bypassed almost immediately, check tower/keep chaining`);
       }
     }
   }
@@ -97,9 +97,10 @@ test("pacing: mirror matchups (fair fights) land inside the 120-360s target wind
 // a real attack target (BUILDINGS.farm.disruptionPenalty hits future
 // income, not a cash balance, when raided) — see docs/PROGRESS.md for the
 // full history of what was tried before this worked. Threshold is 0.7, not
-// 0.5: testing showed a purely passive "def" (never attacks until its wall
-// order is done) losing comfortably to an active "atk" is expected and
-// healthy, not the unanswered-snowball pathology this test exists to catch.
+// 0.5: testing showed a purely passive "def" (never attacks until its own
+// build order is done) losing comfortably to an active "atk" is expected
+// and healthy, not the unanswered-snowball pathology this test exists to
+// catch.
 // NOTE: since commander passives were added, no matchup ends in an outright
 // keep-kill anymore (see docs/PROGRESS.md's open balance question) — so
 // this specific check is currently dormant (its precondition never fires).
@@ -139,7 +140,7 @@ test("per-troop sanity: no single troop type causes an instant collapse or a no-
       // "produced" but never actually attacked. A mono-troop attacker
       // fields its own full commander squad (see monoTroop's comment), so
       // this exercises exactly that combination.
-      const defenderActivity = B.stats.diedAtWall + B.stats.stoppedAtTower + B.stats.reachedKeep + B.stats.farmsRaided;
+      const defenderActivity = B.stats.stoppedAtTower + B.stats.reachedKeep + B.stats.farmsRaided;
       assert.ok(defenderActivity > 0,
         `${troopKey} vs ${defenderName}: attacker produced ${A.troopsProduced} troops but none of them ` +
         `ever resolved an attack (defender combat stats all zero) — troops are vanishing before arrival`);
@@ -176,9 +177,6 @@ test("time-up: every matchup resolves to a well-formed winner/tiebreak, mirrors 
 test("regression baseline: current adopted numbers (update this snapshot deliberately, not accidentally)", () => {
   const { A, B } = run("def", "def");
   // def vs def is the slowest, most stable matchup — good canary for any
-  // accidental change to defense HP, repair cost, or wall numbers. With the
-  // current launch roster's default troop (infantry — low dps), both sides
-  // now survive the full round rather than one dying late; that's the
-  // deliberate current baseline, not a bug.
+  // accidental change to defense HP, repair cost, or troop numbers.
   assert.equal(A.keepDestroyedAtT, null, "def vs def now ends in death, not mutual survival — did defense/troop numbers change?");
 });

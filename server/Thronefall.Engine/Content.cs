@@ -13,9 +13,7 @@ public sealed record FarmConfig(
 
 public sealed record BarracksConfig(double Cost, double BuildTime);
 
-public sealed record WallConfig(double Cost, double BuildTime, double HpPerSegment, int MaxSegments, double Dps, double EngageTime);
-
-public sealed record BuildingsConfig(FarmConfig Farm, BarracksConfig Barracks, WallConfig Wall);
+public sealed record BuildingsConfig(FarmConfig Farm, BarracksConfig Barracks);
 
 public sealed record TowerConfig(double Hp, double Dps, double EngageTime);
 public sealed record KeepConfig(double Hp, double Dps, double EngageTime);
@@ -25,8 +23,15 @@ public sealed record DefenseConfig(int TowerCount, TowerConfig Tower, double Cro
 
 public sealed record RepairConfig(double CostPerMissingHp, double TimePerMissingHp);
 
+// No display name here on purpose: the engine ships stable keys only
+// ("cavalry", "warlord", ...), never a string meant for a player's eyes.
+// The client owns display text (name, description, localization) keyed off
+// these same keys — see client/src/content-text.ts. That split is what lets
+// the game ship in English now and add languages later without touching the
+// engine, and it's why a catalog dump of this file was never localizable in
+// the first place.
 public sealed record TroopConfig(
-    string Name, double Cost, double BuildTime, double MarchTime, double HpFactor, double DpsFactor,
+    double Cost, double BuildTime, double MarchTime, double HpFactor, double DpsFactor,
     double? DefenseResistFactor = null,
     string[]? Bypasses = null,
     IReadOnlyDictionary<string, double>? DamageProfile = null);
@@ -47,8 +52,9 @@ public sealed record CommanderPassives(
     TroopsTargetBonus? InfiltratorResistMult = null,
     double[]? RageEffectBonusByLevel = null);
 
+// Same rule as TroopConfig: no display name, keys only.
 public sealed record CommanderConfig(
-    string Name, string[] SkillOrder, double RageCost, RageEffectConfig RageEffect,
+    string[] SkillOrder, double RageCost, RageEffectConfig RageEffect,
     CommanderPassives Passives, MasteryConfig Mastery);
 
 public static class Content
@@ -72,8 +78,7 @@ public static class Content
         Farm: new FarmConfig(
             Cost: 150, BuildTime: 8, IncomeBonus: 5, Hp: 60, MaxCount: 2,
             AssaultEngageTime: 2, DisruptionPenalty: 6, DisruptionSeconds: 40),
-        Barracks: new BarracksConfig(Cost: 200, BuildTime: 12),
-        Wall: new WallConfig(Cost: 80, BuildTime: 5, HpPerSegment: 120, MaxSegments: 2, Dps: 25, EngageTime: 2));
+        Barracks: new BarracksConfig(Cost: 200, BuildTime: 12));
 
     public static readonly DefenseConfig Defense = new(
         TowerCount: 2,
@@ -86,15 +91,15 @@ public static class Content
 
     public static readonly IReadOnlyDictionary<string, TroopConfig> Troops = new Dictionary<string, TroopConfig>
     {
-        ["infantry"] = new("مشاة — درع ثقيل", Cost: 60, BuildTime: 3, MarchTime: 6, HpFactor: 3.5, DpsFactor: 0.4),
-        ["archer"] = new("رماة — مدى بعيد", Cost: 70, BuildTime: 4, MarchTime: 4, HpFactor: 1.3, DpsFactor: 0.6, DefenseResistFactor: 0.7),
-        ["cavalry"] = new("فرسان — صدمة سريعة", Cost: 90, BuildTime: 4, MarchTime: 2, HpFactor: 0.8, DpsFactor: 0.75),
-        ["ninja"] = new("نينجا — يتسلق الأسوار", Cost: 130, BuildTime: 6, MarchTime: 4, HpFactor: 0.8, DpsFactor: 0.5,
-            Bypasses: new[] { "wall", "tower" }),
-        ["fire"] = new("حارق — يشعل ما يصل إليه", Cost: 55, BuildTime: 2, MarchTime: 4, HpFactor: 0.5, DpsFactor: 0.4,
+        ["infantry"] = new(Cost: 60, BuildTime: 3, MarchTime: 6, HpFactor: 3.5, DpsFactor: 0.4),
+        ["archer"] = new(Cost: 70, BuildTime: 4, MarchTime: 4, HpFactor: 1.3, DpsFactor: 0.6, DefenseResistFactor: 0.7),
+        ["cavalry"] = new(Cost: 90, BuildTime: 4, MarchTime: 2, HpFactor: 0.8, DpsFactor: 0.75),
+        ["ninja"] = new(Cost: 130, BuildTime: 6, MarchTime: 4, HpFactor: 0.8, DpsFactor: 0.5,
+            Bypasses: new[] { "tower" }),
+        ["fire"] = new(Cost: 55, BuildTime: 2, MarchTime: 4, HpFactor: 0.5, DpsFactor: 0.4,
             DamageProfile: new Dictionary<string, double> { ["farm"] = 3, ["keep"] = 2.5 }),
-        ["engineer"] = new("مهندس حصار — يهدم الدفاع", Cost: 90, BuildTime: 6, MarchTime: 7, HpFactor: 1.8, DpsFactor: 0.5,
-            DamageProfile: new Dictionary<string, double> { ["wall"] = 2.5, ["tower"] = 2 }),
+        ["engineer"] = new(Cost: 90, BuildTime: 6, MarchTime: 7, HpFactor: 1.8, DpsFactor: 0.5,
+            DamageProfile: new Dictionary<string, double> { ["tower"] = 2 }),
     };
 
     public static readonly RageConfig Rage = new(Max: 10, FillRatePerSec: 10.0 / 90.0);
@@ -102,7 +107,6 @@ public static class Content
     public static readonly IReadOnlyDictionary<string, CommanderConfig> Commanders = new Dictionary<string, CommanderConfig>
     {
         ["warlord"] = new(
-            Name: "القائد المدمّر — الهجمة الكاسحة",
             SkillOrder: new[] { "rage", "troopDpsBonus", "troopDpsBonus2", "rageEffectBonus" },
             RageCost: 6,
             RageEffect: new("damageStructure", "enemyTower", AmountCurve(320)),
@@ -113,7 +117,6 @@ public static class Content
             Mastery: new(RageEffectMultiplier: 1.15)),
 
         ["guardian"] = new(
-            Name: "الحارسة — الدرع الحصين",
             SkillOrder: new[] { "rage", "troopHpBonus", "structureDamageTakenMult", "rageEffectBonus" },
             RageCost: 6,
             RageEffect: new("repairStructure", "ownDamaged", AmountCurve(260)),
@@ -124,7 +127,6 @@ public static class Content
             Mastery: new(RageEffectMultiplier: 1.15)),
 
         ["shadow"] = new(
-            Name: "الظل — الغارة الخاطفة",
             SkillOrder: new[] { "rage", "marchTimeMult", "infiltratorResistMult", "rageEffectBonus" },
             RageCost: 6,
             RageEffect: new("damageStructure", "enemyFarm", AmountCurve(200)),

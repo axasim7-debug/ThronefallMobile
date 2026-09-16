@@ -26,16 +26,8 @@ public static class Strategies
         public IReadOnlyList<string> Squad => FullSquad;
         public void Decide(PlayerState pl, int t)
         {
-            var farm = Content.Buildings.Farm;
-            var barracks = Content.Buildings.Barracks;
-            if (pl.Farms.Count < farm.MaxCount && pl.Gold >= farm.Cost)
-            {
-                pl.Gold -= farm.Cost; pl.BuildBusy = "farm"; pl.BuildTimer = farm.BuildTime; return;
-            }
-            if (pl.Farms.Count >= farm.MaxCount && !pl.HasBarracks && pl.Gold >= barracks.Cost)
-            {
-                pl.Gold -= barracks.Cost; pl.BuildBusy = "barracks"; pl.BuildTimer = barracks.BuildTime;
-            }
+            if (MatchEngine.StartBuild(pl, "farm")) return;
+            if (pl.Farms.Count >= Content.Buildings.Farm.MaxCount) MatchEngine.StartBuild(pl, "barracks");
         }
     }
 
@@ -43,22 +35,19 @@ public static class Strategies
     {
         public string Name => "def";
         public IReadOnlyList<string> Squad => FullSquad;
+        // With no wall to build (removed — see docs/PROGRESS.md), "defensive"
+        // no longer means "invest in an extra structure before barracks": the
+        // only buildable structures are farm/barracks, both of which "eco"
+        // and "atk" already stress-test at their own extremes. This
+        // archetype's distinguishing trait now is upkeep discipline instead —
+        // one farm for a small cushion, then barracks, then a repair ALWAYS
+        // takes the idle build slot over spending on anything else once a
+        // tower is damaged.
         public void Decide(PlayerState pl, int t)
         {
-            var wall = Content.Buildings.Wall;
-            var barracks = Content.Buildings.Barracks;
-            // repairs only compete for the idle build slot once the initial
-            // wall -> barracks order is done, so they never preempt reaching barracks
-            if (pl.HasBarracks && MatchEngine.StartRepair(pl, t)) return;
-            if (pl.WallMaxHp < wall.MaxSegments * wall.HpPerSegment && pl.Gold >= wall.Cost)
-            {
-                pl.WallMaxHp += wall.HpPerSegment;
-                pl.Gold -= wall.Cost; pl.BuildBusy = "wall"; pl.BuildTimer = wall.BuildTime; return;
-            }
-            if (pl.WallMaxHp >= wall.MaxSegments * wall.HpPerSegment && !pl.HasBarracks && pl.Gold >= barracks.Cost)
-            {
-                pl.Gold -= barracks.Cost; pl.BuildBusy = "barracks"; pl.BuildTimer = barracks.BuildTime;
-            }
+            if (MatchEngine.StartRepair(pl, t)) return;
+            if (pl.Farms.Count < 1 && MatchEngine.StartBuild(pl, "farm")) return;
+            if (!pl.HasBarracks) MatchEngine.StartBuild(pl, "barracks");
         }
     }
 
@@ -68,11 +57,7 @@ public static class Strategies
         public IReadOnlyList<string> Squad => FullSquad;
         public void Decide(PlayerState pl, int t)
         {
-            var barracks = Content.Buildings.Barracks;
-            if (!pl.HasBarracks && pl.Gold >= barracks.Cost)
-            {
-                pl.Gold -= barracks.Cost; pl.BuildBusy = "barracks"; pl.BuildTimer = barracks.BuildTime;
-            }
+            MatchEngine.StartBuild(pl, "barracks");
         }
     }
 

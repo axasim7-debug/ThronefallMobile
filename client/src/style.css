@@ -58,3 +58,321 @@ body {
   padding: 10px calc(var(--safe-right) + 14px) calc(var(--safe-bottom) + 14px) calc(var(--safe-left) + 14px);
   pointer-events: auto;
 }
+
+/* ---------------------------------------------------------------------------
+   HUD — the Clash-Royale-flavored treatment from docs/art-bible.html, ported
+   onto the real HUD's real selectors. Same vocabulary as the bible's
+   specimens: a beveled face-over-a-darker-side on every button, thick
+   dark-outlined display type, resource pills, crowned HP bars. Zero external
+   assets — this is exactly the CSS the bible's page proved works, and
+   nothing here is decorative-only: every value is still server-driven, every
+   button still just sends an intent (docs/GAME_DESIGN.md §5.2).
+   --------------------------------------------------------------------------- */
+
+/* self-hosted, not a Google Fonts CDN link — a game client shipping with a
+   runtime dependency on an external font host being reachable is a fragile
+   choice regardless of environment; this file is 10KB and ships with the
+   bundle. Latin subset only (matches the English-only launch scope). */
+@font-face {
+  font-family: "Lilita One";
+  src: url("./fonts/LilitaOne.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  --g-navy: #16233c;
+  --g-navy-d: #0a1322;
+  --g-gold: #ffc02e;
+  --g-gold-d: #c9820a;
+  --g-green: #5fc14e;
+  --g-green-d: #35802a;
+  --g-red: #e24b3c;
+  --g-red-d: #9e2c22;
+  --g-blue: #3b8fef;
+  --g-blue-d: #1b549e;
+  --g-purple: #7b4fd4;
+  --g-purple-d: #4a2b8c;
+  --g-elixir: #d63fa8;
+  --g-stone: #c3c9d4;
+  --g-stone-d: #7c8698;
+}
+
+html,
+body {
+  background: var(--g-navy-d);
+}
+
+#app,
+.action,
+.gold-amount,
+.income,
+.clock,
+.keep-text,
+.toast,
+.banner {
+  font-family: "Lilita One", system-ui, -apple-system, sans-serif;
+}
+
+#hud-top {
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: linear-gradient(180deg, rgba(6, 9, 16, 0.92), rgba(6, 9, 16, 0));
+}
+
+.bar-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* resource pill: icon overhangs the capsule edge, like the bible's .pill */
+.resource {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  background: var(--g-navy-d);
+  border: 2px solid #33456a;
+  border-radius: 999px;
+  padding: 3px 14px 3px 5px;
+  font-size: 17px;
+  color: #fff;
+  text-shadow: 0 2px 0 rgba(0, 0, 0, 0.6);
+}
+
+.coin {
+  width: 22px;
+  height: 22px;
+  flex: none;
+  border-radius: 50%;
+  background: radial-gradient(circle at 34% 28%, #ffe9a8, #e5a511 68%);
+  box-shadow:
+    inset 0 -3px 0 rgba(0, 0, 0, 0.25),
+    0 2px 4px rgba(0, 0, 0, 0.5);
+}
+
+.gold-amount {
+  font-variant-numeric: tabular-nums;
+}
+
+.income {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--g-green);
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+.income.penalized {
+  color: #ff9a6b;
+}
+
+.clock {
+  font-variant-numeric: tabular-nums;
+  font-size: 20px;
+  color: #fff;
+  text-shadow: 0 2px 0 rgba(0, 0, 0, 0.6);
+}
+
+.keeps {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.keep-line {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #c3cbdb;
+  font-family: system-ui, -apple-system, sans-serif;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.keep-label {
+  min-width: 38px;
+}
+
+/* the crown: same clip-path accent as every HP bar in the bible */
+.keep-label::before {
+  content: "";
+  display: inline-block;
+  width: 13px;
+  height: 11px;
+  margin-inline-end: 4px;
+  vertical-align: -1px;
+  background: linear-gradient(180deg, #ffd45e, var(--g-gold));
+  border: 1.5px solid var(--g-navy-d);
+  border-radius: 2px;
+  clip-path: polygon(0 100%, 0 30%, 22% 55%, 50% 8%, 78% 55%, 100% 30%, 100% 100%);
+}
+
+.hp-track {
+  flex: 1;
+  height: 13px;
+  border: 2px solid var(--g-navy-d);
+  border-radius: 4px;
+  background: #22304a;
+  overflow: hidden;
+}
+
+.hp-fill {
+  height: 100%;
+  width: 100%;
+  transition: width 220ms linear;
+}
+
+.you-fill {
+  background: linear-gradient(180deg, #7fc0ff, var(--g-blue));
+}
+
+.enemy-fill {
+  background: linear-gradient(180deg, #ff8a7a, var(--g-red));
+}
+
+.hp-fill.critical {
+  background: linear-gradient(180deg, #ff8a5e, #ff4d4d);
+}
+
+.keep-text {
+  min-width: 32px;
+  text-align: left;
+  font-size: 12px;
+  color: #fff;
+  text-shadow: 0 1.5px 0 rgba(0, 0, 0, 0.6);
+  font-variant-numeric: tabular-nums;
+}
+
+.tower-pips {
+  display: flex;
+  gap: 3px;
+}
+
+.pip {
+  width: 7px;
+  height: 7px;
+  border-radius: 2px;
+  background: var(--g-blue);
+  box-shadow: 0 0 0 1px var(--g-navy-d);
+}
+
+.pip.down {
+  background: #55606f;
+}
+
+.status {
+  font-size: 11px;
+  color: #93a0b5;
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+#hud-bottom {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  background: linear-gradient(0deg, rgba(6, 9, 16, 0.95), rgba(6, 9, 16, 0));
+}
+
+.row {
+  display: flex;
+  gap: 6px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+/* the beveled button: a bright face over a darker "side" is what makes a
+   flat rectangle read as a pressable object — see docs/art-bible.html's
+   .gbtn. Build/train/repair share one steel-blue family; distinguishing
+   colors per action-type is cosmetic polish for a later pass. */
+.action {
+  flex: 1 1 0;
+  min-width: 56px;
+  min-height: 48px; /* thumb target */
+  padding: 7px 4px 9px;
+  border: 3px solid var(--g-navy-d);
+  border-radius: 11px;
+  background: linear-gradient(180deg, #4f83c9, var(--g-blue));
+  box-shadow:
+    0 4px 0 var(--g-blue-d),
+    0 6px 9px rgba(0, 0, 0, 0.4);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 400;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  cursor: pointer;
+  text-shadow: 0 1.5px 0 rgba(0, 0, 0, 0.55);
+  transition: transform 0.06s ease, box-shadow 0.06s ease;
+}
+
+.action:active:not(:disabled) {
+  transform: translateY(4px);
+  box-shadow:
+    0 1px 0 var(--g-blue-d),
+    0 2px 5px rgba(0, 0, 0, 0.4);
+}
+
+.action:disabled {
+  filter: grayscale(0.5);
+  opacity: 0.55;
+  box-shadow: 0 4px 0 rgba(0, 0, 0, 0.35);
+}
+
+.action-label {
+  letter-spacing: 0.01em;
+}
+
+.action-price {
+  font-size: 11px;
+  color: #ffe9a8;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 1.5px 0 rgba(0, 0, 0, 0.55);
+}
+
+.action-price.unaffordable {
+  color: #ffc7b0;
+}
+
+.toast {
+  align-self: center;
+  padding: 7px 16px;
+  border: 2.5px solid var(--g-navy-d);
+  border-radius: 999px;
+  background: linear-gradient(180deg, #f4705f, var(--g-red));
+  box-shadow: 0 3px 0 var(--g-red-d), 0 5px 8px rgba(0, 0, 0, 0.4);
+  color: #fff;
+  font-size: 12px;
+  text-shadow: 0 1.5px 0 rgba(0, 0, 0, 0.55);
+}
+
+.banner {
+  align-self: center;
+  padding: 12px 22px;
+  border: 3px solid var(--g-navy-d);
+  border-radius: 14px;
+  font-size: 19px;
+  color: #fff;
+  text-shadow: 0 2px 0 rgba(0, 0, 0, 0.5);
+  box-shadow: 0 5px 0 rgba(0, 0, 0, 0.35), 0 8px 14px rgba(0, 0, 0, 0.45);
+}
+
+.banner.win {
+  background: linear-gradient(180deg, #86db6f, var(--g-green));
+}
+
+.banner.lose {
+  background: linear-gradient(180deg, #f4705f, var(--g-red));
+}
+
+.banner.draw,
+.banner.info {
+  background: linear-gradient(180deg, #9fb0cc, var(--g-stone-d));
+}
