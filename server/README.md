@@ -6,9 +6,11 @@
 
 | المشروع | الغرض |
 |---|---|
-| `Thronefall.Engine` | **محرك المحاكاة الفعلي** — نقل C# أمين لـ`tools/balance-sim/src/{content,engine,strategies}.js`. نفس الاقتصاد، نفس نموذج القتال (سور←برج←مزرعة←قلعة)، نفس نظام القادة والغضب، نفس نظام حسم انتهاء الوقت. |
+| `Thronefall.Engine` | **المحرك الشغال فعلياً حالياً (شحن)** — نقل C# أمين لـ`tools/balance-sim/src/{content,engine,strategies}.js`. نموذج قتال مرحلي/فوري (برج←مزرعة←قلعة — مفيش سور، اتحذف، راجع `docs/PROGRESS.md`)، نفس الاقتصاد، نفس نظام القادة والغضب، نفس نظام حسم انتهاء الوقت. `Thronefall.Api` بيوصل على المحرك ده حالياً. |
 | `Thronefall.Engine.Tests` | اختبارات xUnit — نفس ثوابت `tools/balance-sim/test/balance.test.js` (تماثل المرايا، عدم انهيار فوري، إلخ) **+ اختبارات مضاهاة (cross-validation)** ضد أرقام محققة فعلياً من محرك JS، للتأكد إن النقل ما غيّرش السلوك. |
-| `Thronefall.Api` | ASP.NET Core — **`/ws/match`: بروتوكول أوامر اللاعب real-time** (مباراة حية، tick بالثانية، أوامر لاعب فعلية). و`/ws/demo-match` بوت-ضد-بوت متسابة كاختبار اتصال سريع. |
+| `Thronefall.PositionalEngine` | **محرك جديد، بجانب القديم مش بديل له** — نقل C# أمين لـ`tools/battle-sim/src/{engine,match,match-content,match-strategies}.js`: نموذج قتال **مستمر ومرتبط بالموضع الفعلي** (مواضع (x,z) حقيقية، ضرر مستمر بمرور الوقت، لا حل فوري، لا نظام أنواع وحدات متضاربة) بدل الحل المرحلي الفوري القديم. **لسه مش موصول بـ`Thronefall.Api` أو العميل** — المرحلة الحالية هي المحرك بس، مُختبر ومُقارَن بأرقام JS الحقيقية. راجع `docs/PROGRESS.md` لتاريخ التصميم الكامل والسبب في القرار (طلب صريح من المستخدم بتغيير جذري لنموذج القتال). |
+| `Thronefall.PositionalEngine.Tests` | اختبارات xUnit — نفس ثوابت `tools/battle-sim/test/{battle,match}.test.js` **+ اختبارات مضاهاة (cross-validation)** ضد أرقام محققة فعلياً من محرك JS. |
+| `Thronefall.Api` | ASP.NET Core — **`/ws/match`: بروتوكول أوامر اللاعب real-time** (مباراة حية، tick بالثانية، أوامر لاعب فعلية). و`/ws/demo-match` بوت-ضد-بوت متسابة كاختبار اتصال سريع. بيستخدم `Thronefall.Engine` حالياً (المحرك القديم) — ربط `Thronefall.PositionalEngine` خطوة جاية منفصلة. |
 
 ### الملفات المهمة
 
@@ -18,15 +20,20 @@
 
 ## ليه محرك منفصل عن JS بدل ما نستخدم نفس الكود؟
 
-`tools/balance-sim` (JS/Node) هو أداة التكرار السريع لضبط الأرقام — سهل التعديل والاختبار الفوري. لكن **السيرفر الفعلي اللي المباريات الحقيقية هتشتغل عليه لازم يكون .NET** (قرار معماري من `docs/GAME_DESIGN.md`). فبنحافظ على الاتنين **متزامنين عمداً**: أي رقم يتضبط ويتأكد في JS، يتنقل هنا بعدها بنفس القيمة بالظبط — والاختبارات المضاهاة (`CrossValidate_*` في `MatchEngineTests.cs`) هي اللي بتضمن التزامن ده، مش مجرد نية طيبة.
+`tools/balance-sim` و`tools/battle-sim` (JS/Node) هما أدوات التكرار السريع لضبط الأرقام — سهلة التعديل والاختبار الفوري. لكن **السيرفر الفعلي اللي المباريات الحقيقية هتشتغل عليه لازم يكون .NET** (قرار معماري من `docs/GAME_DESIGN.md`). فبنحافظ على كل زوج (JS ↔ C#) **متزامن عمداً**: أي رقم يتضبط ويتأكد في JS، يتنقل هنا بعدها بنفس القيمة بالظبط — والاختبارات المضاهاة (`CrossValidate_*`) هي اللي بتضمن التزامن ده، مش مجرد نية طيبة.
+
+## ليه محرك جديد بجانب القديم، مش تعديل الموجود؟
+
+نموذج القتال الجديد (`Thronefall.PositionalEngine`) تغيير جذري في الشكل — مواضع حقيقية وضرر مستمر بدل حل فوري مرحلي — مش تعديل أرقام على نفس الهيكل. `Thronefall.Engine` **لسه شغال ومُختبر بالكامل** (`Thronefall.Api` بيوصل عليه فعلياً)، فتعديله مباشرة كان هيكسر نظام شغال قبل ما النموذج الجديد يستقر تماماً. القرار (من المستخدم): نبني المحرك الجديد كمشروع منفصل تماماً، نختبره ونثبّته لوحده، وبعدين نقرر نقل `Thronefall.Api` عليه — مش نعدّل تحت نظام شغال.
 
 ## التشغيل
 
 ```bash
 # محتاج .NET 8 SDK (dotnet --version)
 cd server
-dotnet test Thronefall.Engine.Tests/Thronefall.Engine.Tests.csproj   # اختبارات المحرك
-dotnet run --project Thronefall.Api/Thronefall.Api.csproj            # يشغّل السيرفر على http://localhost:5246
+dotnet test Thronefall.Engine.Tests/Thronefall.Engine.Tests.csproj               # اختبارات المحرك الشغال فعلياً
+dotnet test Thronefall.PositionalEngine.Tests/Thronefall.PositionalEngine.Tests.csproj  # اختبارات المحرك الجديد (لسه مش موصول)
+dotnet run --project Thronefall.Api/Thronefall.Api.csproj                       # يشغّل السيرفر على http://localhost:5246
 ```
 
 العب مباراة حقيقية (بعد ما تشغّل السيرفر) — العميل المرجعي مش محتاج أي تثبيت:

@@ -9,6 +9,10 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Thronefall.Engine.Tests", "
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Thronefall.Api", "Thronefall.Api\Thronefall.Api.csproj", "{4491AEDB-9E3E-4A07-BE70-85412035DD4D}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Thronefall.PositionalEngine", "Thronefall.PositionalEngine\Thronefall.PositionalEngine.csproj", "{78B978D4-D058-43BC-B2CA-8E7F5B30CAFD}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Thronefall.PositionalEngine.Tests", "Thronefall.PositionalEngine.Tests\Thronefall.PositionalEngine.Tests.csproj", "{34474525-FF7D-479E-8372-4DA097A03056}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -30,5 +34,13 @@ Global
 		{4491AEDB-9E3E-4A07-BE70-85412035DD4D}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{4491AEDB-9E3E-4A07-BE70-85412035DD4D}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{4491AEDB-9E3E-4A07-BE70-85412035DD4D}.Release|Any CPU.Build.0 = Release|Any CPU
+		{78B978D4-D058-43BC-B2CA-8E7F5B30CAFD}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{78B978D4-D058-43BC-B2CA-8E7F5B30CAFD}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{78B978D4-D058-43BC-B2CA-8E7F5B30CAFD}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{78B978D4-D058-43BC-B2CA-8E7F5B30CAFD}.Release|Any CPU.Build.0 = Release|Any CPU
+		{34474525-FF7D-479E-8372-4DA097A03056}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{34474525-FF7D-479E-8372-4DA097A03056}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{34474525-FF7D-479E-8372-4DA097A03056}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{34474525-FF7D-479E-8372-4DA097A03056}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal
