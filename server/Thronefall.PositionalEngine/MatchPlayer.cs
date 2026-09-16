@@ -10,7 +10,7 @@ public sealed class MatchPlayer
 {
     public string Side { get; }
     public int Direction { get; }
-    public IStrategy Strategy { get; }
+    public string Name { get; }
     public Battle Battle { get; }
     public IReadOnlyList<string> TowerIds { get; }
     public string KeepId { get; }
@@ -36,11 +36,11 @@ public sealed class MatchPlayer
     // separate from a structure's own (ceiling-suppressed) raw Hp.
     private readonly Dictionary<string, double> _damageTaken = new();
 
-    public MatchPlayer(string side, int direction, IStrategy strategy, Battle battle, IReadOnlyList<string> towerIds, string keepId)
+    public MatchPlayer(string side, int direction, string name, Battle battle, IReadOnlyList<string> towerIds, string keepId)
     {
         Side = side;
         Direction = direction;
-        Strategy = strategy;
+        Name = name;
         Battle = battle;
         TowerIds = towerIds;
         KeepId = keepId;

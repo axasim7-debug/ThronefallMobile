@@ -109,7 +109,7 @@ public class MatchTests
                 if (Match.KeepDestroyedAtT(battle, loser) is null || Match.KeepDestroyedAtT(battle, winner) is not null) continue;
                 var ratio = battle.Structures[winner.KeepId].Hp / Content.Defense.Keep.Hp;
                 Assert.True(ratio <= dominanceKeepHpRatio,
-                    $"{winner.Strategy.Name} beat {loser.Strategy.Name} while keeping {ratio * 100:F0}% of its own keep HP — one-sided result");
+                    $"{winner.Name} beat {loser.Name} while keeping {ratio * 100:F0}% of its own keep HP — one-sided result");
             }
         }
     }

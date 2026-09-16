@@ -7,7 +7,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Thronefall.Engine\Thronefall.Engine.csproj" />
+    <ProjectReference Include="..\Thronefall.PositionalEngine\Thronefall.PositionalEngine.csproj" />
   </ItemGroup>
 
 </Project>

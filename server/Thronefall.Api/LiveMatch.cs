@@ -4,12 +4,16 @@ using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using Thronefall.Engine;
+using Thronefall.PositionalEngine;
 
 namespace Thronefall.Api;
 
 /// <summary>
-/// The real-time player protocol (docs/GAME_DESIGN.md §5.3).
+/// The real-time player protocol (docs/GAME_DESIGN.md §5.3), now backed by
+/// Thronefall.PositionalEngine — the continuous positional combat model
+/// (real unit positions, continuous damage, no auto-advance) replaces the
+/// old staged/instant-resolution engine here. See docs/PROGRESS.md for the
+/// full history of the pivot and why.
 ///
 /// The client sends intents and renders what comes back; it decides nothing.
 /// Every command is validated by the engine against server-held state, so a
@@ -21,11 +25,12 @@ namespace Thronefall.Api;
 /// land mid-tick and split a tick's resolution.
 ///
 /// Wire format — client to server:
-///   {"type":"command","kind":"build|train|repair|castRage","arg":"farm","seq":1}
+///   {"type":"command","kind":"build|train|repair|moveUnit","arg":"farm","seq":1}
+///   {"type":"command","kind":"moveUnit","arg":"u17","x":1.5,"z":-2.5,"seq":2}
 /// Server to client:
 ///   {"type":"matchStarted",...}  once, with the static cost catalog
 ///   {"type":"ack",...}           one per command, accepted or rejected
-///   {"type":"state",...}         one per tick
+///   {"type":"state",...}         one per tick — real (x,z) for every unit/structure
 ///   {"type":"matchEnded",...}    once
 /// </summary>
 public static class LiveMatch
@@ -38,9 +43,9 @@ public static class LiveMatch
     private static readonly JsonSerializerOptions Json = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        // CommandKind must go over the wire as "build"/"castRage", not as the
-        // enum's ordinal. A number here is unreadable to the client and would
-        // silently shift if the enum ever gained a member.
+        // CommandKind must go over the wire as "build"/"moveUnit", not as
+        // the enum's ordinal. A number here is unreadable to the client and
+        // would silently shift if the enum ever gained a member.
         Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) },
     };
 
@@ -179,14 +184,16 @@ public static class LiveMatch
             }
             if (!Enum.TryParse<CommandKind>(kindProp.GetString(), ignoreCase: true, out var kind))
             {
-                reason = $"unknown kind '{kindProp.GetString()}' — use build, train, repair or castRage";
+                reason = $"unknown kind '{kindProp.GetString()}' — use build, train, repair or moveUnit";
                 return false;
             }
             var arg = root.TryGetProperty("arg", out var argProp) && argProp.ValueKind == JsonValueKind.String
                 ? argProp.GetString()!
                 : "";
+            double? x = root.TryGetProperty("x", out var xProp) && xProp.TryGetDouble(out var xv) ? xv : null;
+            double? z = root.TryGetProperty("z", out var zProp) && zProp.TryGetDouble(out var zv) ? zv : null;
             long? seq = root.TryGetProperty("seq", out var seqProp) && seqProp.TryGetInt64(out var s) ? s : null;
-            command = new PlayerCommand(kind, arg, seq);
+            command = new PlayerCommand(kind, arg, x, z, seq);
             return true;
         }
         catch (JsonException)

@@ -1,29 +1,31 @@
 namespace Thronefall.PositionalEngine;
 
 /// <summary>
-/// Full-match scenario: economy (gold, build orders, troop training) driving
-/// the continuous positional combat model in Battle.cs, sustained over a
-/// realistic match duration — not just an isolated skirmish. A faithful port
-/// of tools/battle-sim/src/match.js. See docs/PROGRESS.md.
+/// Economy (gold, build orders, troop training) driving the continuous
+/// positional combat model in Battle.cs. A faithful port of
+/// tools/battle-sim/src/match.js. See docs/PROGRESS.md.
 ///
 /// Known deliberate simplifications (not oversights — see docs/PROGRESS.md):
 ///   - farms are pure economy (income) — not physical Battle structures a
 ///     troop can path into or attack. The positional engine's targeting is
 ///     purely nearest-in-range, not a staged wall/tower/farm/keep order, so
 ///     "farm raiding" needs its own deliberate design pass, not a guess.
-///   - bots never retreat or reposition once a group is sent — same baseline
-///     aggression the OLD model's eco/def/atk archetypes always had; this
-///     pass is about economy/combat PACING, not skilled live positioning.
+///   - a BOT's troops don't retreat or reposition once a group is sent — the
+///     same baseline aggression the OLD model's eco/def/atk archetypes always
+///     had. A real player, via PlayerController, gets full manual control of
+///     every unit the instant it's trained (MoveUnit command) — grouping is
+///     bot-testing behavior only, never forced on a live player.
 ///
-/// GROUPING: a troop doesn't march alone the instant it's trained. It waits
-/// at its own barracks (in the reserve — not engaged, since nothing enemy is
-/// anywhere nearby) until AttackGroupSize troops have queued up, then all of
-/// them are sent together. Bots still don't retreat, flank, or spread out
-/// once released — this is "attack in numbers," not "attack with skill."
+/// GROUPING (bot behavior, see PlayerCommands.cs's BotController): a bot's
+/// trained troop waits at its own barracks (unordered — nothing enemy is
+/// anywhere nearby, so it never auto-engages) until AttackGroupSize troops
+/// have queued up, then all of them are sent together. This directly tested
+/// the finding that a solo unit dies to a tower's range advantage before it
+/// can ever fight back.
 /// </summary>
 public static class Match
 {
-    private const int DefaultAttackGroupSize = 3;
+    public const int DefaultAttackGroupSize = 3;
 
     public static double ReinforcementCeiling(double maxHp, double t)
     {
@@ -31,7 +33,7 @@ public static class Match
         return maxHp * (Content.Reinforce.StartFraction + (1 - Content.Reinforce.StartFraction) * progress);
     }
 
-    private static (IReadOnlyList<string> TowerIds, string KeepId) BuildDefense(Battle battle, string side, int direction)
+    internal static (IReadOnlyList<string> TowerIds, string KeepId) BuildDefense(Battle battle, string side, int direction)
     {
         var towerZ = direction * Content.Layout.Tower * Content.PlotDepth;
         var keepZ = direction * Content.Layout.Keep * Content.PlotDepth;
@@ -42,8 +44,8 @@ public static class Match
         return (towerIds, keepId);
     }
 
-    private static (double X, double Z) BarracksAnchor(int direction) => (0, direction * Content.Layout.Econ * Content.PlotDepth);
-    private static (double X, double Z) KeepAnchor(int direction) => (0, direction * Content.Layout.Keep * Content.PlotDepth);
+    internal static (double X, double Z) BarracksAnchor(int direction) => (0, direction * Content.Layout.Econ * Content.PlotDepth);
+    internal static (double X, double Z) KeepAnchor(int direction) => (0, direction * Content.Layout.Keep * Content.PlotDepth);
 
     public static bool StartRepair(MatchPlayer pl, int t)
     {
@@ -88,10 +90,10 @@ public static class Match
         }
     }
 
-    private static bool StartTroop(MatchPlayer pl, string troopKey)
+    public static bool StartTroop(MatchPlayer pl, string troopKey)
     {
         if (pl.TroopBusy || !pl.HasBarracks) return false;
-        var troop = Content.Troops[troopKey];
+        if (!Content.Troops.TryGetValue(troopKey, out var troop)) return false;
         if (pl.Gold < troop.Cost) return false;
         pl.Gold -= troop.Cost;
         pl.TroopBusy = true;
@@ -100,7 +102,7 @@ public static class Match
         return true;
     }
 
-    private static void AdvanceBuild(MatchPlayer pl, int t)
+    internal static void AdvanceBuild(MatchPlayer pl, int t)
     {
         if (pl.BuildBusy is null) return;
         pl.BuildTimer--;
@@ -132,7 +134,7 @@ public static class Match
         pl.BuildBusy = null;
     }
 
-    private static void AdvanceTroop(MatchPlayer pl, int t)
+    internal static void AdvanceTroop(MatchPlayer pl, int t)
     {
         if (!pl.TroopBusy) return;
         pl.TroopTimer--;
@@ -143,78 +145,19 @@ public static class Match
 
         var spawn = BarracksAnchor(pl.Direction);
         var id = pl.Battle.AddUnit(pl.Side, spawn.X, spawn.Z, troopDef.Hp, troopDef.Dps, troopDef.Range, troopDef.Speed, key: pl.TroopKey!);
-        pl.Reserve.Add(id); // held back — see GROUPING header comment
+        pl.Reserve.Add(id); // unordered until a controller sends it — see header comment
     }
 
     /// <summary>Sends every currently-reserved troop at once toward the enemy
-    /// keep, empties the reserve. Bots commit once released — no retreat.</summary>
-    private static void ReleaseReserve(MatchPlayer pl, MatchPlayer enemy)
+    /// keep, empties the reserve. Used by BotController (grouped assault) and
+    /// by the end-of-match sweep in MatchSession — never forced on a real
+    /// player, who commands individual units via MoveUnit instead.</summary>
+    public static void ReleaseReserve(MatchPlayer pl, MatchPlayer enemy)
     {
         if (pl.Reserve.Count == 0) return;
         var target = KeepAnchor(enemy.Direction);
         foreach (var id in pl.Reserve) pl.Battle.MoveUnit(id, target.X, target.Z);
         pl.Reserve.Clear();
-    }
-
-    public sealed record MatchResult(string Winner, string Tiebreak); // Winner: "A" | "B" | "draw"
-
-    /// <summary>Simulate one full 1v1 match. stratA/stratB expose Decide(pl,
-    /// t) (may call StartBuild/StartRepair once) and PickTroop(pl) (defaults
-    /// to "infantry"), same shape as server/Thronefall.Engine/Strategies.cs
-    /// on purpose — these are the same archetypes, ported.</summary>
-    public static (Battle Battle, MatchPlayer A, MatchPlayer B, MatchResult Result) SimulateMatch(IStrategy stratA, IStrategy stratB)
-    {
-        var battle = new Battle();
-        var defA = BuildDefense(battle, "A", -1);
-        var defB = BuildDefense(battle, "B", 1);
-        var a = new MatchPlayer("A", -1, stratA, battle, defA.TowerIds, defA.KeepId);
-        var b = new MatchPlayer("B", 1, stratB, battle, defB.TowerIds, defB.KeepId);
-
-        var duration = Content.Economy.DurationSeconds;
-        var subStepsPerSecond = (int)Math.Round(1 / Battle.DefaultDt);
-
-        for (var t = 0; t <= duration; t++)
-        {
-            if (t > 0)
-            {
-                var beforeHp = new Dictionary<string, double>();
-                foreach (var s in a.MyStructures().Concat(b.MyStructures())) beforeHp[s.Id] = s.Hp;
-
-                for (var i = 0; i < subStepsPerSecond; i++) battle.Step();
-
-                a.ApplyReinforcement(t, beforeHp);
-                b.ApplyReinforcement(t, beforeHp);
-
-                foreach (var (pl, enemy) in new[] { (a, b), (b, a) })
-                {
-                    if (IsKeepDestroyed(battle, pl)) continue;
-                    pl.Gold += pl.Income;
-                    AdvanceBuild(pl, t);
-                    AdvanceTroop(pl, t);
-                    var groupSize = pl.Strategy.AttackGroupSize ?? DefaultAttackGroupSize;
-                    if (pl.Reserve.Count >= groupSize) ReleaseReserve(pl, enemy);
-                }
-            }
-
-            foreach (var (pl, _) in new[] { (a, b), (b, a) })
-            {
-                if (IsKeepDestroyed(battle, pl)) continue;
-                if (pl.BuildBusy is null) pl.Strategy.Decide(pl, t);
-                if (!pl.TroopBusy) StartTroop(pl, pl.Strategy.PickTroop(pl));
-            }
-
-            // end of match: don't leave a half-formed group of trained troops
-            // sitting unused forever — send whatever's left, even if too late
-            // to matter, so final numbers (TroopsProduced, structure HP)
-            // stay honest.
-            if (t == duration)
-            {
-                ReleaseReserve(a, b);
-                ReleaseReserve(b, a);
-            }
-        }
-
-        return (battle, a, b, DetermineWinner(battle, a, b));
     }
 
     public static bool IsKeepDestroyed(Battle battle, MatchPlayer pl) => battle.Structures[pl.KeepId].Destroyed;
@@ -227,7 +170,9 @@ public static class Match
 
     public static int TowersLost(Battle battle, MatchPlayer pl) => pl.TowerIds.Count(id => battle.Structures[id].Destroyed);
 
-    private static MatchResult DetermineWinner(Battle battle, MatchPlayer a, MatchPlayer b)
+    public sealed record MatchResult(string Winner, string Tiebreak); // Winner: "A" | "B" | "draw"
+
+    internal static MatchResult DetermineWinner(Battle battle, MatchPlayer a, MatchPlayer b)
     {
         var aDied = KeepDestroyedAtT(battle, a);
         var bDied = KeepDestroyedAtT(battle, b);
@@ -249,5 +194,17 @@ public static class Match
         if (aKeepFraction != bKeepFraction) return new(aKeepFraction > bKeepFraction ? "A" : "B", "own-keep-hp-pct");
 
         return new("draw", "true-draw");
+    }
+
+    /// <summary>Runs a full bot-vs-bot match. A thin driver over MatchSession
+    /// — the tick loop itself lives there and is shared with live networked
+    /// matches, so these validated numbers keep testing the code real players
+    /// actually run (same relationship as MatchEngine.Simulate / MatchSession
+    /// in the old engine).</summary>
+    public static (Battle Battle, MatchPlayer A, MatchPlayer B, MatchResult Result) SimulateMatch(IStrategy stratA, IStrategy stratB)
+    {
+        var session = new MatchSession(new BotController(stratA), new BotController(stratB));
+        session.RunToCompletion();
+        return (session.Battle, session.A, session.B, session.Result!);
     }
 }

@@ -1,5 +1,8 @@
 #!/usr/bin/env node
-// A real client for the live match protocol (server/Thronefall.Api/LiveMatch.cs).
+// A real client for the live match protocol (server/Thronefall.Api/LiveMatch.cs),
+// now speaking to Thronefall.PositionalEngine (docs/PROGRESS.md has the pivot
+// history — real (x,z) unit/structure positions, continuous combat, no
+// commanders/rage yet).
 //
 // This is the reference implementation of "what the game client does": it
 // sends intents and renders what comes back. It resolves nothing — no damage,
@@ -37,14 +40,16 @@ let catalog = null;
 const acks = [];
 let lastState = null;
 let ended = null;
+let sentAttackers = false;
 
-const send = (kind, arg) => {
+const send = (kind, arg, extra = {}) => {
   seq += 1;
-  socket.send(JSON.stringify({ type: 'command', kind, arg, seq }));
+  socket.send(JSON.stringify({ type: 'command', kind, arg, seq, ...extra }));
   return seq;
 };
 
 const log = (...a) => { if (!quiet) console.log(...a); };
+const keepOf = (side) => side.structures.find((s) => s.key === 'keep');
 
 socket.addEventListener('open', () => log(`→ connected: ${url}`));
 
@@ -61,14 +66,13 @@ socket.addEventListener('message', (event) => {
       catalog = msg.catalog;
       log(`→ match started: you are side ${msg.side} vs "${msg.opponent}", ${msg.duration}s at ${msg.speed}x`);
       log(`  catalog: ${Object.keys(catalog.troops).length} troops, ` +
-          `${Object.keys(catalog.commanders).length} commanders, ` +
           `barracks ${catalog.buildings.barracks.cost}g`);
       if (probe) {
         // the client is untrusted: prove the server refuses these
         send('build', 'wonder-of-the-world');
         send('train', 'dragon');
-        send('castRage', 'warlord');      // not charged this early
-        send('train', 'infantry');        // no barracks yet
+        send('train', 'infantry');            // no barracks yet
+        send('moveUnit', 'ghost-unit', { x: 0, z: 0 }); // unit doesn't exist
         socket.send('{not json at all');
         socket.send(JSON.stringify({ type: 'command', kind: 'teleport' }));
       }
@@ -94,8 +98,10 @@ socket.addEventListener('message', (event) => {
       decide(msg);
       if (msg.tick % 60 === 0) {
         const y = msg.you, e = msg.enemy;
-        log(`  t=${String(msg.tick).padStart(3)}  you: ${y.gold}g keep ${y.keep.hp}/${y.keep.maxHp} ` +
-            `troops ${y.troopsProduced}  |  enemy: keep ${e.keep.hp}/${e.keep.maxHp} troops ${e.troopsProduced}`);
+        const yKeep = keepOf(y), eKeep = keepOf(e);
+        log(`  t=${String(msg.tick).padStart(3)}  you: ${y.gold}g keep ${yKeep.hp}/${yKeep.maxHp} ` +
+            `troops ${y.troopsProduced} units ${y.units.length}  |  ` +
+            `enemy: keep ${eKeep.hp}/${eKeep.maxHp} troops ${e.troopsProduced} units ${e.units.length}`);
       }
       break;
     }
@@ -108,9 +114,10 @@ socket.addEventListener('message', (event) => {
   }
 });
 
-// The entire "AI" of this client: a plain build order expressed as intents.
-// Note what is absent — no damage maths, no cooldown tracking, no notion of
-// who is winning. It asks; the server decides, and a refusal is normal.
+// The entire "AI" of this client: a plain build order plus "send any idle
+// unit at the enemy keep" expressed as intents. Note what is absent — no
+// damage maths, no notion of who is winning, no pathing. It asks; the server
+// decides, and a refusal is normal.
 //
 // The price check below is presentation only — it is what greys out a button,
 // using the catalog the server sent. It is NOT a permission check: the server
@@ -133,9 +140,15 @@ function decide(state) {
     if (canAfford(state, 'train', 'cavalry')) send('train', 'cavalry');
   }
 
-  // fire any commander whose bar the server says is full
-  for (const commander of you.commanders) {
-    if (commander.ready) send('castRage', commander.key);
+  // A live player has full manual control — nothing auto-sends a trained
+  // troop. This client's "AI" is deliberately minimal: send everything
+  // currently standing idle (no waypoint yet) at the enemy keep, once.
+  if (!sentAttackers && you.units.some((u) => u.waypointX === null)) {
+    const enemyKeep = keepOf(state.enemy);
+    for (const u of you.units) {
+      if (u.waypointX === null) send('moveUnit', u.id, { x: enemyKeep.x, z: enemyKeep.z });
+    }
+    sentAttackers = you.units.length > 0 && you.units.every((u) => u.waypointX !== null);
   }
 }
 
@@ -151,9 +164,10 @@ socket.addEventListener('close', () => {
   }
   if (lastState) {
     const y = lastState.you, e = lastState.enemy;
+    const yKeep = keepOf(y), eKeep = keepOf(e);
     console.log(`final tick:        ${lastState.tick}/${lastState.duration}`);
-    console.log(`you:               keep ${y.keep.hp}  troops ${y.troopsProduced}  towers lost ${y.towersLost}  rage casts ${y.commanders.reduce((n, c) => n + c.casts, 0)}`);
-    console.log(`enemy:             keep ${e.keep.hp}  troops ${e.troopsProduced}  towers lost ${e.towersLost}`);
+    console.log(`you:               keep ${yKeep.hp}  troops ${y.troopsProduced}  units ${y.units.length}`);
+    console.log(`enemy:             keep ${eKeep.hp}  troops ${e.troopsProduced}  units ${e.units.length}`);
   }
   if (ended) console.log(`result:            ${ended.winner} by ${ended.tiebreak}`);
 
@@ -163,7 +177,6 @@ socket.addEventListener('close', () => {
     reasons: [...new Set(acks.filter((a) => !a.accepted).map((a) => a.reason))],
     tick: lastState?.tick ?? null,
     troops: lastState?.you.troopsProduced ?? null,
-    casts: lastState?.you.commanders.reduce((n, c) => n + c.casts, 0) ?? null,
     winner: ended?.winner ?? null,
     tiebreak: ended?.tiebreak ?? null,
   })}`);
