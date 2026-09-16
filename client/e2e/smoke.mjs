@@ -124,19 +124,25 @@ await page.goto(`${base}/?opponent=${opponent}&speed=${speed}`, { waitUntil: "ne
 
 // The app now opens on a splash -> lobby screen (docs/UI_UX_IDENTITY.md §10)
 // instead of connecting immediately — walk through it like a real player:
-// wait for the splash's fixed beat, press Battle, then the fixed
-// "searching for opponent" beat before the match actually connects.
+// wait for the splash's fixed beat, press Battle, then the "searching for
+// opponent" beat before the match actually connects. That beat plus the
+// WebSocket round-trip is real network+server time, not a fixed duration —
+// poll for the catalog instead of guessing a wait long enough to cover it
+// (a fixed wait here previously raced the handshake and failed spuriously).
 await page.waitForTimeout(1500);
 await page.click(".cta-battle");
-await page.waitForTimeout(1100);
 
 // the client ships with no content list — every button here came from the
 // server's catalog, so an empty row means the handshake silently failed
-const opening = await page.evaluate(() => ({
-  builds: document.querySelectorAll(".builds .action").length,
-  troops: document.querySelectorAll(".troops .action").length,
-  clock: document.querySelector(".clock")?.textContent ?? "",
-}));
+let opening = { builds: 0, troops: 0, clock: "—:—" };
+for (let i = 0; i < 50 && (opening.builds === 0 || opening.troops === 0 || opening.clock === "—:—"); i++) {
+  await page.waitForTimeout(100);
+  opening = await page.evaluate(() => ({
+    builds: document.querySelectorAll(".builds .action").length,
+    troops: document.querySelectorAll(".troops .action").length,
+    clock: document.querySelector(".clock")?.textContent ?? "",
+  }));
+}
 console.log("catalog rendered:", JSON.stringify(opening));
 if (opening.troops === 0 || opening.builds === 0) fail("server catalog never rendered");
 if (opening.clock === "—:—") fail("no state frame arrived");
