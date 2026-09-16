@@ -24,6 +24,10 @@ public sealed record SideView(
     double TroopTimer,
     string? TroopKey,
     int TroopsProduced,
+    double KingX,
+    double KingZ,
+    double? KingWaypointX,
+    double? KingWaypointZ,
     IReadOnlyList<StructureView> Structures,
     IReadOnlyList<UnitView> Units);
 
@@ -83,6 +87,10 @@ public static class SnapshotBuilder
             TroopTimer: pl.TroopTimer,
             TroopKey: pl.TroopKey,
             TroopsProduced: pl.TroopsProduced,
+            KingX: pl.KingX,
+            KingZ: pl.KingZ,
+            KingWaypointX: pl.KingWaypointX,
+            KingWaypointZ: pl.KingWaypointZ,
             Structures: structures,
             Units: units);
     }
@@ -110,6 +118,18 @@ public static class SnapshotBuilder
             tower = new { hp = Content.Defense.Tower.Hp, dps = Content.Defense.Tower.Dps, range = Content.Defense.Tower.Range },
             keep = new { hp = Content.Defense.Keep.Hp, dps = Content.Defense.Keep.Dps, range = Content.Defense.Keep.Range },
         },
-        layout = new { plotDepth = Content.PlotDepth, tower = Content.Layout.Tower, econ = Content.Layout.Econ, keep = Content.Layout.Keep },
+        layout = new
+        {
+            plotDepth = Content.PlotDepth,
+            tower = Content.Layout.Tower,
+            econ = Content.Layout.Econ,
+            keep = Content.Layout.Keep,
+            // sideways offset of the farm plot from the barracks/keep centerline —
+            // see Content.cs's FarmPlotOffsetX comment. The barracks plot sits
+            // directly on the centerline at the econ depth, so it needs no
+            // separate offset here.
+            farmPlotOffsetX = Content.FarmPlotOffsetX,
+        },
+        king = new { speed = Content.King.Speed, buildRadius = Content.King.BuildRadius },
     };
 }

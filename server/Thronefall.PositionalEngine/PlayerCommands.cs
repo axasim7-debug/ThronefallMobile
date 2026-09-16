@@ -12,10 +12,11 @@ namespace Thronefall.PositionalEngine;
 /// </summary>
 public enum CommandKind
 {
-    Build,      // Arg: "farm" | "barracks"
+    Build,      // Arg: "farm" | "barracks" — requires the king within Content.King.BuildRadius of the plot
     Train,      // Arg: a key from Content.Troops
-    Repair,     // Arg: ignored (the engine picks the damaged tower)
+    Repair,     // Arg: ignored (the engine picks the damaged tower) — requires the king within range of that tower
     MoveUnit,   // Arg: the unit's id; X/Z: the target position
+    MoveKing,   // Arg: ignored; X/Z: the king's target position
 }
 
 /// <summary>One intent from a client. X/Z are only meaningful for MoveUnit.
@@ -117,16 +118,19 @@ public sealed class PlayerController : IMatchController
             switch (cmd.Kind)
             {
                 case CommandKind.Build:
-                    Resolve(cmd, t, Match.StartBuild(pl, cmd.Arg), () => WhyBuildFailed(pl, cmd.Arg));
+                    Resolve(cmd, t, TryBuild(pl, cmd.Arg), () => WhyBuildFailed(pl, cmd.Arg));
                     break;
                 case CommandKind.Train:
                     Resolve(cmd, t, Match.StartTroop(pl, cmd.Arg), () => WhyTrainFailed(pl, cmd.Arg));
                     break;
                 case CommandKind.Repair:
-                    Resolve(cmd, t, Match.StartRepair(pl, t), () => WhyRepairFailed(pl));
+                    Resolve(cmd, t, TryRepair(pl, t), () => WhyRepairFailed(pl, t));
                     break;
                 case CommandKind.MoveUnit:
                     Resolve(cmd, t, TryMoveUnit(pl, cmd), () => WhyMoveFailed(pl, cmd));
+                    break;
+                case CommandKind.MoveKing:
+                    Resolve(cmd, t, TryMoveKing(pl, cmd), () => WhyMoveKingFailed(cmd));
                     break;
             }
         }
@@ -138,6 +142,37 @@ public sealed class PlayerController : IMatchController
         if (!pl.Battle.Units.TryGetValue(cmd.Arg, out var unit)) return false;
         if (unit.Side != pl.Side || !unit.Alive) return false;
         return pl.Battle.MoveUnit(cmd.Arg, cmd.X.Value, cmd.Z.Value);
+    }
+
+    private static bool TryMoveKing(MatchPlayer pl, PlayerCommand cmd)
+    {
+        if (cmd.X is null || cmd.Z is null) return false;
+        pl.KingWaypointX = cmd.X.Value;
+        pl.KingWaypointZ = cmd.Z.Value;
+        return true;
+    }
+
+    /// <summary>The king must be standing at (or within Content.King.
+    /// BuildRadius of) the relevant plot before Build/Repair is even
+    /// attempted — walking there first is the whole mechanic (Content.cs's
+    /// KingConfig doc comment). This is a PlayerController-only gate:
+    /// BotController calls Match.StartBuild/StartRepair directly and never
+    /// goes through here, so every previously-validated bot number is
+    /// unaffected.</summary>
+    private static bool IsKingTooFar(MatchPlayer pl, (double X, double Z)? plot) =>
+        plot is not null && Battle.Distance(pl.KingX, pl.KingZ, plot.Value.X, plot.Value.Z) > Content.King.BuildRadius;
+
+    private static bool TryBuild(MatchPlayer pl, string building)
+    {
+        if (IsKingTooFar(pl, Match.PlotAnchorFor(pl.Direction, building))) return false;
+        return Match.StartBuild(pl, building);
+    }
+
+    private static bool TryRepair(MatchPlayer pl, int t)
+    {
+        var target = Match.FindRepairTarget(pl, t);
+        if (target is not null && IsKingTooFar(pl, (target.X, target.Z))) return false;
+        return Match.StartRepair(pl, t);
     }
 
     private void Resolve(PlayerCommand cmd, int t, bool ok, Func<string> reason)
@@ -162,6 +197,7 @@ public sealed class PlayerController : IMatchController
     {
         if (building is not ("farm" or "barracks")) return "unknown-building";
         if (pl.BuildBusy is not null) return "build-slot-busy";
+        if (IsKingTooFar(pl, Match.PlotAnchorFor(pl.Direction, building))) return "king-too-far";
         return building switch
         {
             "farm" => pl.Farms >= Content.Buildings.Farm.MaxCount ? "farm-limit-reached" : "not-enough-gold",
@@ -177,8 +213,13 @@ public sealed class PlayerController : IMatchController
         return "not-enough-gold";
     }
 
-    private static string WhyRepairFailed(MatchPlayer pl) =>
-        pl.BuildBusy is not null ? "build-slot-busy" : "nothing-to-repair-or-not-enough-gold";
+    private static string WhyRepairFailed(MatchPlayer pl, int t)
+    {
+        if (pl.BuildBusy is not null) return "build-slot-busy";
+        var target = Match.FindRepairTarget(pl, t);
+        if (target is not null && IsKingTooFar(pl, (target.X, target.Z))) return "king-too-far";
+        return "nothing-to-repair-or-not-enough-gold";
+    }
 
     private static string WhyMoveFailed(MatchPlayer pl, PlayerCommand cmd)
     {
@@ -188,4 +229,7 @@ public sealed class PlayerController : IMatchController
         if (!unit.Alive) return "unit-already-dead";
         return "invalid-move";
     }
+
+    private static string WhyMoveKingFailed(PlayerCommand cmd) =>
+        cmd.X is null || cmd.Z is null ? "move-needs-coordinates" : "invalid-move";
 }

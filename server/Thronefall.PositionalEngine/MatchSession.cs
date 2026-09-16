@@ -14,6 +14,7 @@ namespace Thronefall.PositionalEngine;
 ///   0. freeze buffered player input for this tick
 ///   1. advance combat (several Battle.Step sub-steps to cover one second)
 ///   2. reinforcement bookkeeping, off a real pre-combat HP snapshot
+///   2b. advance each side's king toward its waypoint, if any
 ///   3. income, build/train timers
 ///   4. agency (bot decide/train/release, or player command resolution)
 /// </summary>
@@ -77,6 +78,11 @@ public sealed class MatchSession
 
             A.ApplyReinforcement(t, beforeHp);
             B.ApplyReinforcement(t, beforeHp);
+
+            // king movement — independent of keep/gold state, so it keeps
+            // working right up to the last tick even for a losing side
+            A.AdvanceKing(1.0);
+            B.AdvanceKing(1.0);
 
             // 3. income, build/train timers
             foreach (var pl in new[] { A, B })

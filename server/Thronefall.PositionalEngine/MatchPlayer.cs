@@ -32,6 +32,19 @@ public sealed class MatchPlayer
     /// header comment.</summary>
     public List<string> Reserve { get; } = new();
 
+    /// <summary>The player's own mobile presence on the field — not a Battle
+    /// Unit (it must never be auto-targeted in combat), so its position lives
+    /// here as plain fields. Starts at the keep; moves only via an explicit
+    /// MoveKing command, gating Build/Repair for PlayerController (see
+    /// Content.cs's KingConfig doc comment and PlayerCommands.cs). A bot's
+    /// king exists too (every MatchPlayer has one) but never moves and never
+    /// gates anything — BotController calls Match.StartBuild/StartRepair
+    /// directly, untouched by this mechanic.</summary>
+    public double KingX { get; set; }
+    public double KingZ { get; set; }
+    public double? KingWaypointX { get; set; }
+    public double? KingWaypointZ { get; set; }
+
     // Reinforcement bookkeeping: cumulative REAL combat damage taken, kept
     // separate from a structure's own (ceiling-suppressed) raw Hp.
     private readonly Dictionary<string, double> _damageTaken = new();
@@ -47,6 +60,10 @@ public sealed class MatchPlayer
 
         Gold = Content.Economy.StartGold;
         Income = Content.Economy.BaseIncome;
+
+        var keepAnchor = Match.KeepAnchor(direction);
+        KingX = keepAnchor.X;
+        KingZ = keepAnchor.Z;
 
         foreach (var s in MyStructures())
         {
@@ -91,5 +108,27 @@ public sealed class MatchPlayer
             _damageTaken[s.Id] = dt;
             s.Hp = Math.Max(0, Match.ReinforcementCeiling(s.MaxHp, t) - dt);
         }
+    }
+
+    /// <summary>Moves the king one tick's worth of distance toward its
+    /// waypoint, if any — the same arrive-and-clear logic as Battle's unit
+    /// movement, kept separate here because the king is deliberately not a
+    /// Battle Unit (see the field doc comment above).</summary>
+    public void AdvanceKing(double dt)
+    {
+        if (KingWaypointX is not double targetX || KingWaypointZ is not double targetZ) return;
+        var maxStep = Content.King.Speed * dt;
+        var distance = Battle.Distance(KingX, KingZ, targetX, targetZ);
+        if (distance <= maxStep || distance == 0)
+        {
+            KingX = targetX;
+            KingZ = targetZ;
+            KingWaypointX = null;
+            KingWaypointZ = null;
+            return;
+        }
+        var fraction = maxStep / distance;
+        KingX += (targetX - KingX) * fraction;
+        KingZ += (targetZ - KingZ) * fraction;
     }
 }

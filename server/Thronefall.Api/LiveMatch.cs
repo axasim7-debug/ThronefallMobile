@@ -25,8 +25,9 @@ namespace Thronefall.Api;
 /// land mid-tick and split a tick's resolution.
 ///
 /// Wire format — client to server:
-///   {"type":"command","kind":"build|train|repair|moveUnit","arg":"farm","seq":1}
+///   {"type":"command","kind":"build|train|repair|moveUnit|moveKing","arg":"farm","seq":1}
 ///   {"type":"command","kind":"moveUnit","arg":"u17","x":1.5,"z":-2.5,"seq":2}
+///   {"type":"command","kind":"moveKing","arg":"","x":1.5,"z":-2.5,"seq":3}
 /// Server to client:
 ///   {"type":"matchStarted",...}  once, with the static cost catalog
 ///   {"type":"ack",...}           one per command, accepted or rejected
@@ -184,7 +185,7 @@ public static class LiveMatch
             }
             if (!Enum.TryParse<CommandKind>(kindProp.GetString(), ignoreCase: true, out var kind))
             {
-                reason = $"unknown kind '{kindProp.GetString()}' — use build, train, repair or moveUnit";
+                reason = $"unknown kind '{kindProp.GetString()}' — use build, train, repair, moveUnit or moveKing";
                 return false;
             }
             var arg = root.TryGetProperty("arg", out var argProp) && argProp.ValueKind == JsonValueKind.String

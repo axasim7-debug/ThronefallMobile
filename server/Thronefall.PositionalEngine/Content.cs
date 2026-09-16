@@ -34,6 +34,16 @@ public sealed record RepairConfig(double CostPerMissingHp, double TimePerMissing
 
 public sealed record LayoutConfig(double Tower, double Econ, double Keep);
 
+// The king: the player's own mobile presence on the field. Building,
+// upgrading, and repairing all require walking the king within BuildRadius
+// of the target first (docs/PROGRESS.md — "king walks and builds", agreed
+// directly with the user, not in GAME_DESIGN.md). Speed is a deliberate
+// middle ground: faster than the tankiest troop (infantry), slower than the
+// fastest (cavalry) — the king is the one piece a player moves constantly,
+// so it shouldn't be the slowest thing on the field, but it also isn't a
+// combat unit and has no reason to outrun a shock-cavalry rush.
+public sealed record KingConfig(double Speed, double BuildRadius);
+
 public static class Content
 {
     public static readonly EconomyConfig Economy = new(DurationSeconds: 360, StartGold: 100, BaseIncome: 8);
@@ -86,4 +96,13 @@ public static class Content
     public static readonly ReinforceConfig Reinforce = new(StartFraction: 0.35, RampSeconds: 90);
 
     public static readonly RepairConfig Repair = new(CostPerMissingHp: 0.6, TimePerMissingHp: 0.08);
+
+    // Speed sits between infantry's (MarchDistance/6 ≈ 1.8) and cavalry's
+    // (MarchDistance/2 ≈ 5.4) — see the KingConfig doc comment.
+    public static readonly KingConfig King = new(Speed: 2.6, BuildRadius: 1.5);
+
+    // How far off the barracks/keep centerline the farm plot sits — a plain
+    // sideways offset at the same depth as the barracks anchor, giving the
+    // king a real, distinct spot to walk to that isn't the barracks itself.
+    public const double FarmPlotOffsetX = 2.5;
 }

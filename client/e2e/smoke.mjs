@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 // End-to-end smoke check: drives the real client, in a real browser, at a real
 // phone size, against the real server. Plays a match through to its result,
-// performs a REAL drag gesture to move a trained unit, and fails loudly on
-// any console error. Backed by Thronefall.PositionalEngine — see
-// docs/PROGRESS.md for the pivot from the old staged-combat engine.
+// performs a REAL drag gesture to walk the king onto the barracks plot (the
+// king walk-and-build mechanic — Build is refused until it does) and a
+// second one to move a trained unit, and fails loudly on any console error.
+// Backed by Thronefall.PositionalEngine — see docs/PROGRESS.md for the pivot
+// from the old staged-combat engine and for the king mechanic itself.
 //
 // The tamper probe sends a raw WebSocket frame with a nonsense troop key
 // rather than clicking a disabled UI button. That was tried first and was
@@ -110,6 +112,7 @@ await page.addInitScript(() => {
         const msg = JSON.parse(event.data);
         if (msg.type === "state") window.__thronefallLatestState = msg;
         if (msg.type === "ack") window.__thronefallAcks.push(msg);
+        if (msg.type === "matchStarted") window.__thronefallCatalog = msg.catalog;
       } catch { /* not JSON we care about */ }
     });
     return socket;
@@ -154,6 +157,47 @@ if (!refused.shown) fail("server accepted a command it should have refused (or t
 if (!refused.text.toLowerCase().includes("unknown")) fail(`unexpected refusal reason: ${refused.text}`);
 
 await shot("01-start");
+
+// King walk-and-build (docs/PROGRESS.md): Build now requires the king to be
+// physically standing on the plot first, so before the play loop even
+// starts building a barracks, drag the king there — a real gesture, exactly
+// like the unit drag below, computing the barracks plot's world position
+// from the same catalog constants the client itself uses (protocol.ts's
+// Catalog.layout), not a hardcoded guess.
+const catalog = await page.evaluate(() => window.__thronefallCatalog ?? null);
+if (!catalog) fail("no matchStarted catalog was ever captured");
+else {
+  const before = await page.evaluate(() => {
+    const you = window.__thronefallLatestState?.you;
+    const keep = you?.structures?.find((s) => s.key === "keep");
+    return you && keep ? { kingX: you.kingX, kingZ: you.kingZ, keepZ: keep.z } : null;
+  });
+  if (!before) fail("no king/keep state to compute the barracks plot from");
+  else {
+    const sign = before.keepZ < 0 ? -1 : 1;
+    const barracksPlot = { x: 0, z: sign * catalog.layout.econ * catalog.layout.plotDepth };
+    const from = await page.evaluate((k) => window.__thronefallProject(k.kingX, k.kingZ), before);
+    const to = await page.evaluate((p) => window.__thronefallProject(p.x, p.z), barracksPlot);
+
+    await page.mouse.move(from.x, from.y);
+    await page.mouse.down();
+    await page.mouse.move(to.x, to.y, { steps: 8 });
+    await page.mouse.up();
+
+    let arrived = false;
+    for (let i = 0; i < 100 && !arrived; i++) {
+      await page.waitForTimeout(100);
+      arrived = await page.evaluate((p) => {
+        const you = window.__thronefallLatestState?.you;
+        if (!you) return false;
+        return Math.hypot(you.kingX - p.x, you.kingZ - p.z) < 1.6; // server's buildRadius is 1.5
+      }, barracksPlot);
+    }
+    console.log("king dragged to barracks plot, arrived:", arrived);
+    if (!arrived) fail("king never arrived at the barracks plot after a real drag gesture");
+  }
+}
+await shot("01b-king-at-plot");
 
 // play it out: build a barracks, train troops, and — the new part — once a
 // unit exists, actually DRAG it on the canvas (a real pointer gesture, not a

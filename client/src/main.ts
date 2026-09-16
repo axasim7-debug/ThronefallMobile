@@ -50,6 +50,7 @@ const hud = new Hud(send);
 const connection = new MatchConnection(url, {
   onStarted(message) {
     hud.applyCatalog(message.catalog);
+    city.setCatalog(message.catalog);
     hud.setStatus(`Match started — opponent: ${message.opponent}`);
   },
 
@@ -98,6 +99,9 @@ function describeTiebreak(tiebreak: string): string {
 // Press on one of your own units, drag, release on a spot on the field — the
 // server gets one moveUnit(id, x, z) command. No camera drag, no other
 // gesture; docs/GAME_DESIGN.md §2 calls for exactly this, one-thumb control.
+// Same gesture drags the king (moveKing) — the physical presence Build/
+// Repair require walking to a plot/tower first (see docs/PROGRESS.md's king
+// walk-and-build mechanic).
 
 function pointerToNdc(event: PointerEvent): { x: number; y: number } {
   const rect = canvas!.getBoundingClientRect();
@@ -108,31 +112,45 @@ function pointerToNdc(event: PointerEvent): { x: number; y: number } {
 }
 
 let draggingUnitId: string | null = null;
+let draggingKing = false;
 
 canvas.addEventListener("pointerdown", (event) => {
   if (!latest || latest.finished) return;
   const ndc = pointerToNdc(event);
+
   const unitId = city.pickOwnUnitAt(ndc.x, ndc.y);
-  if (!unitId) return;
-  draggingUnitId = unitId;
-  canvas.setPointerCapture(event.pointerId);
-  city.setSelected(unitId);
-  city.setDragGhost(city.groundPointAt(ndc.x, ndc.y));
+  if (unitId) {
+    draggingUnitId = unitId;
+    canvas.setPointerCapture(event.pointerId);
+    city.setSelected(unitId);
+    city.setDragGhost(city.groundPointAt(ndc.x, ndc.y));
+    return;
+  }
+
+  if (city.pickOwnKingAt(ndc.x, ndc.y)) {
+    draggingKing = true;
+    canvas.setPointerCapture(event.pointerId);
+    city.setKingSelected(true);
+    city.setDragGhost(city.groundPointAt(ndc.x, ndc.y));
+  }
 });
 
 canvas.addEventListener("pointermove", (event) => {
-  if (!draggingUnitId) return;
+  if (!draggingUnitId && !draggingKing) return;
   const ndc = pointerToNdc(event);
   city.setDragGhost(city.groundPointAt(ndc.x, ndc.y));
 });
 
 function endDrag(event: PointerEvent) {
-  if (!draggingUnitId) return;
+  if (!draggingUnitId && !draggingKing) return;
   const ndc = pointerToNdc(event);
   const point = city.groundPointAt(ndc.x, ndc.y);
-  send("moveUnit", draggingUnitId, point.x, point.z);
+  if (draggingKing) send("moveKing", "", point.x, point.z);
+  else if (draggingUnitId) send("moveUnit", draggingUnitId, point.x, point.z);
   draggingUnitId = null;
+  draggingKing = false;
   city.setSelected(null);
+  city.setKingSelected(false);
   city.setDragGhost(null);
 }
 

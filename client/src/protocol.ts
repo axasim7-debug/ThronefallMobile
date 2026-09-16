@@ -41,6 +41,10 @@ export interface SideView {
   troopTimer: number;
   troopKey: string | null;
   troopsProduced: number;
+  kingX: number;
+  kingZ: number;
+  kingWaypointX: number | null;
+  kingWaypointZ: number | null;
   structures: StructureView[];
   units: UnitView[];
 }
@@ -81,10 +85,14 @@ export interface Catalog {
   buildings: Record<string, BuildingCatalogEntry>;
   troops: Record<string, TroopCatalogEntry>;
   defense: { towerCount: number; tower: DefenseCatalogEntry; keep: DefenseCatalogEntry };
-  layout: { plotDepth: number; tower: number; econ: number; keep: number };
+  /** farmPlotOffsetX: sideways offset of the farm plot from the barracks/keep
+   * centerline — the barracks plot itself sits directly on that centerline,
+   * at the econ depth, so it needs no separate offset. */
+  layout: { plotDepth: number; tower: number; econ: number; keep: number; farmPlotOffsetX: number };
+  king: { speed: number; buildRadius: number };
 }
 
-export type CommandKind = "build" | "train" | "repair" | "moveUnit";
+export type CommandKind = "build" | "train" | "repair" | "moveUnit" | "moveKing";
 
 export interface CommandAck {
   type: "ack";
@@ -210,6 +218,7 @@ const REFUSAL_TEXT: Record<string, string> = {
   "unit-already-dead": "That unit is gone",
   "move-needs-coordinates": "Move command needs a destination",
   "invalid-move": "That move isn't valid",
+  "king-too-far": "Walk your king there first",
 };
 
 export const refusalText = (reason: string | null): string =>

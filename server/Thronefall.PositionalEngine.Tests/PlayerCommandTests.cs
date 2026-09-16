@@ -34,6 +34,22 @@ public class PlayerCommandTests
         return Assert.Single(acks);
     }
 
+    /// <summary>Walks A's king onto the given plot instantly (bypassing
+    /// AdvanceKing) — every Build/Repair test below needs this now that
+    /// those commands require the king to actually be standing there. Tests
+    /// that exercise the king-gating itself do NOT use this helper.</summary>
+    private static void PutKingAt(MatchSession session, (double X, double Z) plot)
+    {
+        session.A.KingX = plot.X;
+        session.A.KingZ = plot.Z;
+    }
+
+    private static (double X, double Z) FarmPlot(MatchSession session) =>
+        (Content.FarmPlotOffsetX, session.A.Direction * Content.Layout.Econ * Content.PlotDepth);
+
+    private static (double X, double Z) BarracksPlot(MatchSession session) =>
+        (0, session.A.Direction * Content.Layout.Econ * Content.PlotDepth);
+
     // --- the player actually gets agency -------------------------------
 
     [Fact]
@@ -42,6 +58,7 @@ public class PlayerCommandTests
         var (session, player) = NewMatch();
         session.Step(); // t=0
         session.A.Gold = Content.Buildings.Farm.Cost;
+        PutKingAt(session, FarmPlot(session));
 
         var goldBefore = session.A.Gold;
         player.Submit(new PlayerCommand(CommandKind.Build, "farm", ClientSeq: 7));
@@ -60,6 +77,7 @@ public class PlayerCommandTests
         var (session, player) = NewMatch();
         session.Step();
         session.A.Gold = Content.Buildings.Farm.Cost;
+        PutKingAt(session, FarmPlot(session));
         player.Submit(new PlayerCommand(CommandKind.Build, "farm"));
 
         StepTo(session, (int)Content.Buildings.Farm.BuildTime + 4);
@@ -169,6 +187,127 @@ public class PlayerCommandTests
         Assert.Equal("move-needs-coordinates", ack.Reason);
     }
 
+    // --- king walk-and-build: Build/Repair require the king to be there --
+
+    [Fact]
+    public void Build_IsRefused_WhenTheKingIsFarFromThePlot()
+    {
+        var (session, player) = NewMatch();
+        session.Step();
+        session.A.Gold = 10_000;
+        // king starts at the keep, deliberately not repositioned near any plot
+
+        player.Submit(new PlayerCommand(CommandKind.Build, "farm"));
+        session.Step();
+
+        var ack = SingleAck(player);
+        Assert.False(ack.Accepted);
+        Assert.Equal("king-too-far", ack.Reason);
+        Assert.Null(session.A.BuildBusy);
+        Assert.Equal(10_000 + Content.Economy.BaseIncome, session.A.Gold); // income ticked, but never charged for the farm
+    }
+
+    [Fact]
+    public void Build_Succeeds_OnceTheKingWalksToThePlot()
+    {
+        var (session, player) = NewMatch();
+        session.Step();
+        session.A.Gold = 10_000;
+        PutKingAt(session, BarracksPlot(session));
+
+        player.Submit(new PlayerCommand(CommandKind.Build, "barracks"));
+        session.Step();
+
+        Assert.True(SingleAck(player).Accepted);
+        Assert.Equal("barracks", session.A.BuildBusy);
+    }
+
+    [Fact]
+    public void Repair_IsRefused_WhenTheKingIsFarFromTheDamagedTower()
+    {
+        var (session, player) = NewMatch();
+        session.Step();
+        session.A.Gold = 10_000;
+        var tower = session.Battle.Structures[session.A.TowerIds[0]];
+        DamageThroughRealCombat(session, tower);
+        // king stays at the keep — nowhere near either tower
+
+        player.Submit(new PlayerCommand(CommandKind.Repair, ""));
+        session.Step();
+
+        var ack = SingleAck(player);
+        Assert.False(ack.Accepted);
+        Assert.Equal("king-too-far", ack.Reason);
+        Assert.Null(session.A.BuildBusy);
+    }
+
+    [Fact]
+    public void Repair_Succeeds_OnceTheKingWalksToTheDamagedTower()
+    {
+        var (session, player) = NewMatch();
+        session.Step();
+        session.A.Gold = 10_000;
+        var tower = session.Battle.Structures[session.A.TowerIds[0]];
+        DamageThroughRealCombat(session, tower);
+        session.A.KingX = tower.X;
+        session.A.KingZ = tower.Z;
+
+        player.Submit(new PlayerCommand(CommandKind.Repair, ""));
+        session.Step();
+
+        Assert.True(SingleAck(player).Accepted);
+        Assert.Equal("repair", session.A.BuildBusy);
+    }
+
+    /// <summary>Dents a tower for real, through Battle combat, so the
+    /// reinforcement bookkeeping (MatchPlayer's private _damageTaken) stays
+    /// consistent — directly poking Structure.Hp does NOT create a lasting
+    /// repair target: the very next tick's ApplyReinforcement recomputes Hp
+    /// from ceiling(t) minus recorded damage and stomps an untracked
+    /// assignment straight back to the ramp value (the same
+    /// snapshot-vs-formula distinction documented on ApplyReinforcement
+    /// itself).</summary>
+    private static void DamageThroughRealCombat(MatchSession session, Structure tower)
+    {
+        session.Battle.AddUnit("B", tower.X, tower.Z, hp: 999, dps: 50, range: 10, speed: 0, key: "raider");
+        StepTo(session, session.Tick + 1);
+        Assert.True(tower.Hp < Match.ReinforcementCeiling(tower.MaxHp, session.Tick), "the tower should be a genuine repair target now");
+    }
+
+    [Fact]
+    public void MoveKing_SetsAWaypoint_ThatAdvanceKingWalksTowardOverTime()
+    {
+        var (session, player) = NewMatch();
+        session.Step();
+        var farmPlot = FarmPlot(session);
+
+        player.Submit(new PlayerCommand(CommandKind.MoveKing, "", X: farmPlot.X, Z: farmPlot.Z));
+        session.Step();
+
+        Assert.True(SingleAck(player).Accepted);
+        Assert.Equal((farmPlot.X, farmPlot.Z), (session.A.KingWaypointX, session.A.KingWaypointZ));
+
+        StepTo(session, session.Tick + 20); // more than enough time to arrive at king speed
+
+        Assert.Null(session.A.KingWaypointX);
+        Assert.Equal(farmPlot.X, session.A.KingX, 3);
+        Assert.Equal(farmPlot.Z, session.A.KingZ, 3);
+    }
+
+    [Fact]
+    public void MoveKing_WithoutCoordinates_IsRefused()
+    {
+        var (session, player) = NewMatch();
+        session.Step();
+
+        player.Submit(new PlayerCommand(CommandKind.MoveKing, ""));
+        session.Step();
+
+        var ack = SingleAck(player);
+        Assert.False(ack.Accepted);
+        Assert.Equal("move-needs-coordinates", ack.Reason);
+    }
+
     // --- refusals: the client does not get to lie ----------------------
 
     [Fact]
@@ -177,6 +316,7 @@ public class PlayerCommandTests
         var (session, player) = NewMatch();
         session.Step();
         session.A.Gold = 0;
+        PutKingAt(session, BarracksPlot(session));
 
         player.Submit(new PlayerCommand(CommandKind.Build, "barracks"));
         session.Step();
@@ -194,6 +334,7 @@ public class PlayerCommandTests
         var (session, player) = NewMatch();
         session.Step();
         session.A.Gold = 10_000;
+        PutKingAt(session, FarmPlot(session));
 
         player.Submit(new PlayerCommand(CommandKind.Build, "farm"));
         player.Submit(new PlayerCommand(CommandKind.Build, "farm"));
@@ -212,6 +353,7 @@ public class PlayerCommandTests
         var (session, player) = NewMatch();
         session.Step();
         session.A.Gold = 10_000;
+        PutKingAt(session, FarmPlot(session));
 
         for (var i = 0; i < Content.Buildings.Farm.MaxCount; i++)
         {
@@ -288,6 +430,7 @@ public class PlayerCommandTests
         // a damaged tower exists, so repair has a legitimate target
         var tower = session.Battle.Structures[session.A.TowerIds[0]];
         tower.Hp = tower.MaxHp - 50;
+        PutKingAt(session, BarracksPlot(session));
 
         player.Submit(new PlayerCommand(CommandKind.Build, "barracks"));
         session.Step();

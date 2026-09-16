@@ -14,6 +14,7 @@
 import type { Catalog, CommandKind, MatchState, SideView } from "./protocol";
 import { refusalText } from "./protocol";
 import { buildingName, troopName, BUILD_IN_PROGRESS_TEXT } from "./content-text";
+import { plotAnchors } from "./scene";
 
 export type CommandSender = (kind: CommandKind, arg?: string, x?: number, z?: number) => void;
 
@@ -186,6 +187,7 @@ export class Hud {
         disabled = you.buildBusy !== null || you.gold < entry.cost;
         if (action.arg === "farm" && you.farms >= (entry.maxCount ?? Infinity)) disabled = true;
         if (action.arg === "barracks" && you.hasBarracks) disabled = true;
+        if (!disabled && this.isKingTooFarToBuild(you, action.arg)) disabled = true;
       } else if (action.kind === "train") {
         const entry = this.catalog.troops[action.arg];
         disabled = !you.hasBarracks || you.troopBusy || you.gold < entry.cost;
@@ -202,6 +204,22 @@ export class Hud {
         action.priceEl.classList.toggle("unaffordable", price !== undefined && you.gold < price);
       }
     }
+  }
+
+  /** Build's plot is a fixed, known location (plotAnchors — pure geometry
+   * from the catalog), so disabling the button early when the king hasn't
+   * walked there yet is still just presentation, same as the price/slot
+   * checks above. Repair gets no equivalent check: which tower needs it is
+   * the engine's own decision (server/Thronefall.PositionalEngine/Match.cs's
+   * FindRepairTarget), and duplicating that here would be exactly the game
+   * logic this client isn't supposed to have — a stale/wrong guess would be
+   * worse than just letting the server's "king-too-far" refusal surface via
+   * the toast. */
+  private isKingTooFarToBuild(you: SideView, building: string): boolean {
+    if (!this.catalog || (building !== "farm" && building !== "barracks")) return false;
+    const anchors = plotAnchors(this.catalog, you);
+    const plot = building === "farm" ? anchors.farm : anchors.barracks;
+    return Math.hypot(you.kingX - plot.x, you.kingZ - plot.z) > this.catalog.king.buildRadius;
   }
 
   // ---- feedback ---------------------------------------------------------
@@ -237,7 +255,11 @@ function describeActivity(you: SideView): string {
   if (you.troopBusy && you.troopKey) {
     parts.push(`Training ${troopName(you.troopKey)} (${Math.ceil(you.troopTimer)}s)`);
   }
-  if (parts.length === 0) return you.hasBarracks ? "Drag units on the field to move them" : "Build a barracks to train troops";
+  if (parts.length === 0) {
+    return you.hasBarracks
+      ? "Drag units on the field to move them"
+      : "Drag your king to the barracks plot, then Build";
+  }
   return parts.join(" · ");
 }
 

@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import type { MatchState, SideView, StructureView } from "./protocol";
+import type { Catalog, MatchState, SideView, StructureView } from "./protocol";
 
 // The real-time positional battlefield. Every mesh here reflects a value
 // the server sent — structures and units both carry real (x, z) from
@@ -27,6 +27,8 @@ const COLORS = {
   enemy: 0xe2564a,
   selected: 0xffe066,
   ghost: 0xffffff,
+  crown: 0xffe066,
+  plot: 0xffffff,
 };
 
 interface UnitEntry {
@@ -35,10 +37,27 @@ interface UnitEntry {
   targetZ: number;
 }
 
+/** Fixed world anchor for each side's unbuilt farm/barracks plot — pure
+ * geometry from the server's published catalog constants (Content.cs's
+ * Layout/FarmPlotOffsetX), not a game decision. Farms and barracks are
+ * never Battle structures (see Match.cs's header comment), so unlike a
+ * tower or the keep there is no StructureView to read a position off —
+ * this is the only way the client knows where to draw them or where the
+ * king has to walk. */
+export function plotAnchors(catalog: Catalog, side: SideView): { farm: { x: number; z: number }; barracks: { x: number; z: number } } {
+  const keep = side.structures.find((s) => s.key === "keep");
+  const sign = keep && keep.z < 0 ? -1 : 1;
+  const z = sign * catalog.layout.econ * catalog.layout.plotDepth;
+  return { farm: { x: catalog.layout.farmPlotOffsetX, z }, barracks: { x: 0, z } };
+}
+
 export interface CityScene {
   scene: THREE.Scene;
   camera: THREE.PerspectiveCamera;
   onResize(width: number, height: number): void;
+  /** The static catalog, sent once at match start — needed here only to
+   * place the unbuilt farm/barracks plot markers (see plotAnchors). */
+  setCatalog(catalog: Catalog): void;
   update(state: MatchState): void;
   /** Eases meshes toward their latest reported position — called every
    * render frame, independent of how often server ticks arrive. */
@@ -47,9 +66,14 @@ export interface CityScene {
    * id under the pointer, or null. Only "you" units are ever returned —
    * nothing here lets a pointer pick up an enemy unit. */
   pickOwnUnitAt(ndcX: number, ndcY: number): string | null;
+  /** Normalized device coords -> true if your own king is under the
+   * pointer. The king is deliberately not a unit (server-side it isn't a
+   * Battle Unit either — see MatchPlayer.cs), so it gets its own pick. */
+  pickOwnKingAt(ndcX: number, ndcY: number): boolean;
   /** Normalized device coords -> world (x, z) on the ground plane. */
   groundPointAt(ndcX: number, ndcY: number): { x: number; z: number };
   setSelected(unitId: string | null): void;
+  setKingSelected(selected: boolean): void;
   setDragGhost(point: { x: number; z: number } | null): void;
 }
 
@@ -78,6 +102,39 @@ function createUnitMesh(whose: "you" | "enemy"): THREE.Mesh {
   const geo = new THREE.SphereGeometry(0.32, 12, 10);
   const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: teamColor(whose), roughness: 0.5 }));
   mesh.position.y = 0.5;
+  return mesh;
+}
+
+/** The king: a cone (distinct silhouette from the round unit meshes, so a
+ * glance tells you which draggable thing is which) with a small gold
+ * "crown" ring, in the same team color as everything else that side owns. */
+function createKingMesh(whose: "you" | "enemy"): THREE.Mesh {
+  const mesh = new THREE.Mesh(
+    new THREE.ConeGeometry(0.42, 0.95, 6),
+    new THREE.MeshStandardMaterial({ color: teamColor(whose), roughness: 0.4 }),
+  );
+  mesh.position.y = 0.65;
+  const crown = new THREE.Mesh(
+    new THREE.TorusGeometry(0.2, 0.05, 6, 12),
+    new THREE.MeshStandardMaterial({ color: COLORS.crown, roughness: 0.3 }),
+  );
+  crown.rotation.x = Math.PI / 2;
+  crown.position.y = 0.55;
+  mesh.add(crown);
+  return mesh;
+}
+
+/** A shaded, walk-here-to-build plot marker for a farm or barracks — neither
+ * is a Battle structure (see plotAnchors' comment), so this is the only
+ * on-field cue for where those buildings will land. Hidden once built. */
+function createPlotMarker(): THREE.Mesh {
+  const mesh = new THREE.Mesh(
+    new THREE.CircleGeometry(0.9, 24),
+    new THREE.MeshBasicMaterial({ color: COLORS.plot, transparent: true, opacity: 0.16, side: THREE.DoubleSide }),
+  );
+  mesh.rotation.x = -Math.PI / 2;
+  mesh.position.y = 0.015;
+  mesh.visible = false;
   return mesh;
 }
 
@@ -121,6 +178,18 @@ export function buildCityScene(): CityScene {
   const structureMeshes = new Map<string, THREE.Mesh>();
   const youUnits = new Map<string, UnitEntry>();
   const enemyUnits = new Map<string, UnitEntry>();
+
+  let catalog: Catalog | null = null;
+
+  const youKing: UnitEntry = { mesh: createKingMesh("you"), targetX: 0, targetZ: 0 };
+  const enemyKing: UnitEntry = { mesh: createKingMesh("enemy"), targetX: 0, targetZ: 0 };
+  scene.add(youKing.mesh);
+  scene.add(enemyKing.mesh);
+
+  const farmPlot = createPlotMarker();
+  const barracksPlot = createPlotMarker();
+  scene.add(farmPlot);
+  scene.add(barracksPlot);
 
   const selectionRing = new THREE.Mesh(
     new THREE.RingGeometry(0.42, 0.52, 24),
@@ -191,6 +260,26 @@ export function buildCityScene(): CityScene {
         pool.delete(id);
       }
     }
+
+    const king = whose === "you" ? youKing : enemyKing;
+    king.targetX = side.kingX;
+    king.targetZ = side.kingZ;
+
+    // farm/barracks plots aren't Battle structures, so this is the only
+    // place their world position ever gets computed — only drawn for your
+    // own side, matching "you drag your own things" everywhere else here
+    if (whose === "you" && catalog) {
+      const anchors = plotAnchors(catalog, side);
+      const farmMax = catalog.buildings.farm.maxCount ?? Infinity;
+      farmPlot.position.set(anchors.farm.x, farmPlot.position.y, anchors.farm.z);
+      farmPlot.visible = side.farms < farmMax;
+      barracksPlot.position.set(anchors.barracks.x, barracksPlot.position.y, anchors.barracks.z);
+      barracksPlot.visible = !side.hasBarracks;
+    }
+  }
+
+  function setCatalog(newCatalog: Catalog) {
+    catalog = newCatalog;
   }
 
   function update(state: MatchState) {
@@ -208,6 +297,10 @@ export function buildCityScene(): CityScene {
         entry.mesh.position.x += (entry.targetX - entry.mesh.position.x) * ease;
         entry.mesh.position.z += (entry.targetZ - entry.mesh.position.z) * ease;
       }
+    }
+    for (const king of [youKing, enemyKing]) {
+      king.mesh.position.x += (king.targetX - king.mesh.position.x) * ease;
+      king.mesh.position.z += (king.targetZ - king.mesh.position.z) * ease;
     }
   }
 
@@ -230,6 +323,11 @@ export function buildCityScene(): CityScene {
     return null;
   }
 
+  function pickOwnKingAt(ndcX: number, ndcY: number): boolean {
+    raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), camera);
+    return raycaster.intersectObject(youKing.mesh, true).length > 0;
+  }
+
   function setSelected(unitId: string | null) {
     if (unitId === null) {
       selectionRing.visible = false;
@@ -242,6 +340,15 @@ export function buildCityScene(): CityScene {
     }
     selectionRing.visible = true;
     selectionRing.position.set(entry.mesh.position.x, 0.03, entry.mesh.position.z);
+  }
+
+  function setKingSelected(selected: boolean) {
+    if (!selected) {
+      selectionRing.visible = false;
+      return;
+    }
+    selectionRing.visible = true;
+    selectionRing.position.set(youKing.mesh.position.x, 0.03, youKing.mesh.position.z);
   }
 
   function setDragGhost(point: { x: number; z: number } | null) {
@@ -258,5 +365,18 @@ export function buildCityScene(): CityScene {
     camera.updateProjectionMatrix();
   }
 
-  return { scene, camera, onResize, update, tick, pickOwnUnitAt, groundPointAt, setSelected, setDragGhost };
+  return {
+    scene,
+    camera,
+    onResize,
+    setCatalog,
+    update,
+    tick,
+    pickOwnUnitAt,
+    pickOwnKingAt,
+    groundPointAt,
+    setSelected,
+    setKingSelected,
+    setDragGhost,
+  };
 }

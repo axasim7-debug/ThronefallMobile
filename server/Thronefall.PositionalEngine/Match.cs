@@ -47,10 +47,28 @@ public static class Match
     internal static (double X, double Z) BarracksAnchor(int direction) => (0, direction * Content.Layout.Econ * Content.PlotDepth);
     internal static (double X, double Z) KeepAnchor(int direction) => (0, direction * Content.Layout.Keep * Content.PlotDepth);
 
+    /// <summary>The tower repair would target right now, if any — exposed so
+    /// PlayerController can check king-proximity against this exact
+    /// structure before StartRepair is even called.</summary>
+    internal static Structure? FindRepairTarget(MatchPlayer pl, int t) =>
+        pl.MyTowers().FirstOrDefault(s => !s.Destroyed && s.Hp < ReinforcementCeiling(s.MaxHp, t));
+
+    /// <summary>Where the king has to stand to build/rebuild each plot — a
+    /// fixed anchor per building kind, distinct from where the finished
+    /// structure ends up (there's no farm Structure in Battle at all; see
+    /// Match.cs's header comment). Null for a building kind that has no
+    /// plot (i.e. doesn't exist).</summary>
+    internal static (double X, double Z)? PlotAnchorFor(int direction, string building) => building switch
+    {
+        "farm" => (Content.FarmPlotOffsetX, direction * Content.Layout.Econ * Content.PlotDepth),
+        "barracks" => BarracksAnchor(direction),
+        _ => null,
+    };
+
     public static bool StartRepair(MatchPlayer pl, int t)
     {
         if (pl.BuildBusy is not null) return false;
-        var target = pl.MyTowers().FirstOrDefault(s => !s.Destroyed && s.Hp < ReinforcementCeiling(s.MaxHp, t));
+        var target = FindRepairTarget(pl, t);
         if (target is null) return false;
         var missing = ReinforcementCeiling(target.MaxHp, t) - target.Hp;
         var cost = Math.Ceiling(missing * Content.Repair.CostPerMissingHp);
